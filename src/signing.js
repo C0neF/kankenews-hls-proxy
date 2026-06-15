@@ -143,7 +143,7 @@ function decodeUrl(encodedStr) {
         // 校验: 分隔符必须存在,且前面的填充字节全是 FF (至少 8 字节)
         if (separatorPos >= 12) {
           const padding = decHex.slice(4, separatorPos);
-          const allFF = /^FF+$/.test(padding);
+          const allFF = /^ff+$/i.test(padding);
           if (allFF) {
             const dataHex = decHex.slice(separatorPos + 2);
             let str = '';

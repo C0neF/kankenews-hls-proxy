@@ -50,7 +50,7 @@ function decodeUrl(encodedStr) {
         for (let k = 4; k < decHex.length; k += 2) {
           if (decHex.slice(k, k + 2) === '00') { sep = k; break; }
         }
-        if (sep >= 12 && /^FF+$/.test(decHex.slice(4, sep))) {
+        if (sep >= 12 && /^ff+$/i.test(decHex.slice(4, sep))) {
           const dataHex = decHex.slice(sep + 2);
           let str = '';
           for (let j = 0; j < dataHex.length; j += 2) {
