@@ -86,116 +86,71 @@ async function capture() {
   const page = await context.newPage();
 
   try {
-    // 1. 打开页面 (让页面 JS 加载完成,拿到 kapi 签名模块)
+    // 1. 先注册 response 拦截 (在页面导航之前)
+    //    用 waitForResponse 在页面自己消费响应之前拿到数据
+    const channelDetailPromise = page.waitForResponse(
+      (resp) => resp.url().includes('/content/pc/tv/channel/detail'),
+      { timeout: 30000 }
+    );
+
+    // 2. 打开页面 (页面 JS 会自动调 kapi,带签名)
     console.log('  Opening page...');
-    await page.goto(PAGE_URL, { waitUntil: 'networkidle', timeout: 30000 });
-    console.log('  Page loaded');
+    await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    console.log('  Page loaded, waiting for kapi response...');
 
-    // 2. 在页面上下文中直接调 kapi API
-    //    页面的 JS 已经加载了 axios 实例(带签名),我们直接用它
-    console.log('  Calling kapi API from page context...');
-
-    const result = await page.evaluate(async (channelId) => {
-      try {
-        // 方式 1: 直接用页面的 axios 实例 (已带签名)
-        if (window.$nuxt && window.$nuxt.$axios) {
-          const resp = await window.$nuxt.$axios.get(
-            '/content/pc/tv/channel/detail',
-            { params: { channel_id: channelId } }
-          );
-          return { method: 'nuxt-axios', data: resp.data || resp };
-        }
-      } catch (e) {}
-
-      try {
-        // 方式 2: 直接 fetch kapi (页面 JS 会自动加签名头)
-        const url = new URL('https://kapi.kankanews.com/content/pc/tv/channel/detail');
-        url.searchParams.set('channel_id', channelId);
-
-        // 用页面自带的签名函数
-        if (window.signRequest) {
-          const headers = window.signRequest({ channel_id: channelId });
-          for (const [k, v] of Object.entries(headers)) {
-            url.searchParams.set(k, v);
-          }
-        }
-
-        const resp = await fetch(url.href);
-        return { method: 'fetch', data: await resp.json() };
-      } catch (e) {
-        return { error: e.message };
-      }
-    }, CHANNEL_ID);
-
-    if (result.error) {
-      console.log('  API call failed:', result.error);
-    } else {
-      console.log(`  API response (${result.method}):`, JSON.stringify(result.data).substring(0, 200));
-    }
-
-    // 3. 如果页面调用失败,回退:从 Network 拦截已加载的 API 响应
-    //    (用 page.evaluate 在页面里找已缓存的响应数据)
-    let channelInfo = null;
-
-    if (result.data && result.data.code === 1000 && result.data.result) {
-      channelInfo = result.data.result;
-      console.log(`  Got channel info: ${channelInfo.name || channelId}`);
-    } else {
-      // 回退: 从页面 DOM/script 中提取
-      console.log('  Trying to extract from page state...');
-      const pageData = await page.evaluate(() => {
-        // Nuxt 页面可能在 __NUXT__ 或 Vuex store 里有数据
-        try {
-          if (window.__NUXT__ && window.__NUXT__.data) {
-            return JSON.stringify(window.__NUXT__.data);
-          }
-        } catch {}
-        return null;
-      });
-
-      if (pageData) {
-        console.log('  Found __NUXT__ data, length:', pageData.length);
-      }
-    }
+    // 3. 拦截响应 (页面自己的 axios 发出的,带完整签名)
+    const channelResp = await channelDetailPromise;
+    const respData = await channelResp.json().catch(() => null);
 
     await browser.close();
 
-    // 4. 解码流地址
-    if (channelInfo) {
-      const encoded = channelInfo.shift_address || channelInfo.live_address || '';
-      if (encoded) {
-        console.log(`  Encoded stream URL length: ${encoded.length}`);
-        const m3u8Url = decodeUrl(encoded);
-
-        if (m3u8Url && m3u8Url.startsWith('http')) {
-          console.log(`  Decoded m3u8: ${m3u8Url.substring(0, 120)}...`);
-
-          let exp = null, streamName = null, userIp = null;
-          try {
-            const urlObj = new URL(m3u8Url);
-            const token = urlObj.searchParams.get('token');
-            if (token) {
-              const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-              exp = payload.exp;
-              streamName = payload.stream_name;
-              userIp = payload.user_ip;
-              console.log(`  JWT exp: ${new Date(exp * 1000).toISOString()}`);
-              console.log(`  JWT stream: ${streamName}`);
-              console.log(`  JWT user_ip: ${userIp}`);
-            }
-          } catch {}
-
-          const cache = { url: m3u8Url, exp, streamName, userIp, capturedAt: Math.floor(Date.now() / 1000), channelId: CHANNEL_ID };
-          fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2));
-          console.log(`  Saved to ${CACHE_FILE}`);
-          return cache;
-        }
-      }
-      console.log('  WARNING: No encoded stream URL in channel info');
+    if (!respData || respData.code !== 1000 || !respData.result) {
+      console.log('  WARNING: channel/detail API failed:', JSON.stringify(respData).substring(0, 200));
+      return null;
     }
 
-    console.log('  WARNING: Could not get channel info');
-    return null;
+    const channelInfo = respData.result;
+    console.log(`  ✓ Channel info: ${channelInfo.name || channelId}`);
+
+    // 4. 解码流地址
+    const encoded = channelInfo.shift_address || channelInfo.live_address || '';
+    if (!encoded) {
+      console.log('  WARNING: No encoded stream URL');
+      return null;
+    }
+
+    console.log(`  Encoded stream URL length: ${encoded.length}`);
+    const m3u8Url = decodeUrl(encoded);
+
+    if (!m3u8Url || !m3u8Url.startsWith('http')) {
+      console.log('  WARNING: RSA decode failed');
+      return null;
+    }
+
+    console.log(`  Decoded m3u8: ${m3u8Url.substring(0, 120)}...`);
+
+    // 解析 JWT
+    let exp = null, streamName = null, userIp = null;
+    try {
+      const urlObj = new URL(m3u8Url);
+      const token = urlObj.searchParams.get('token');
+      if (token) {
+        const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+        exp = payload.exp;
+        streamName = payload.stream_name;
+        userIp = payload.user_ip;
+        console.log(`  JWT exp: ${new Date(exp * 1000).toISOString()}`);
+        console.log(`  JWT stream: ${streamName}`);
+        console.log(`  JWT user_ip: ${userIp}`);
+      }
+    } catch {}
+
+    // 保存缓存
+    const cache = { url: m3u8Url, exp, streamName, userIp, capturedAt: Math.floor(Date.now() / 1000), channelId: CHANNEL_ID };
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2));
+    console.log(`  Saved to ${CACHE_FILE}`);
+    return cache;
+
   } catch (e) {
     console.error('  Error:', e.message);
     await browser.close();
