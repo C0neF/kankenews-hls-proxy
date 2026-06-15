@@ -93,25 +93,16 @@ PotPlayer: `http://<NAS IP>:53535/wx.m3u` (频道列表)
 
 ## 工作原理
 
-```
-┌───────────────────── Docker 容器 ──────────────────────┐
-│                                                         │
-│  Playwright (每 10 小时)                                │
-│  → 打开 kankanews 回看页面                              │
-│  → 浏览器 JS 自动完成 API 签名 + RSA 解密              │
-│  → 截获 m3u8 URL (JWT 绑定容器出口 IP)                 │
-│                                                         │
-│  Node.js 代理                                           │
-│  → /wx.m3u    返回全部频道 M3U 播放列表                 │
-│  → /?id=X     返回单频道 m3u8 (带 Referer)              │
-│  → /seg?u=..  流式代理 .ts 分片 (带缓存)               │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
-                              │
-                              │ 出口 IP = JWT user_ip ✅
-                              ▼
-                     CDN (volc-stream.kksmg.com)
-                     IP 校验通过 ✅
+```mermaid
+flowchart TB
+  subgraph docker["Docker 容器"]
+    capture["Playwright (每 10 小时)<br/>打开 kankanews 回看页面<br/>浏览器 JS 自动完成 API 签名 + RSA 解密<br/>截获 m3u8 URL (JWT 绑定容器出口 IP)"]
+    proxy["Node.js 代理<br/>/wx.m3u 返回全部频道 M3U 播放列表<br/>/?id=X 返回单频道 m3u8 (带 Referer)<br/>/seg?u=.. 流式代理 .ts 分片 (带缓存)"]
+  end
+
+  capture --> proxy
+  proxy --> ip["出口 IP = JWT user_ip ✅"]
+  ip --> cdn["CDN (volc-stream.kksmg.com)<br/>IP 校验通过 ✅"]
 ```
 
 ## 管理
