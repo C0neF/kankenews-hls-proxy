@@ -1,0 +1,14 @@
+# .dockerignore - 排除不需要的文件
+
+.git
+.github
+.gitignore
+README.md
+LICENSE
+docs/
+tools/
+deploy/
+*.md
+*.bat
+docker-compose*.yml
+node_modules/

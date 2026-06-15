@@ -1,0 +1,11 @@
+# docker-compose.build.yml - 本地构建覆盖文件
+#
+# 用法:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+
+services:
+  kk-proxy:
+    image: kk-hls-proxy:local
+    build:
+      context: .
+      dockerfile: Dockerfile

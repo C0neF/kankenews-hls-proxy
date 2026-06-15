@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Cache files
+/tmp/
+seg_cache/
+*.ts
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Secrets (don't commit real tokens)
+# m3u8-cache.json

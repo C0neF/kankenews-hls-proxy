@@ -1,0 +1,13 @@
+{
+  "name": "kankanews-hls-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "kankanews HLS proxy for PotPlayer",
+  "scripts": {
+    "start": "node src/vps-server.js",
+    "capture": "node src/vps-capture.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.40.0"
+  }
+}

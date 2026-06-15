@@ -1,0 +1,39 @@
+# docker-compose.yml - kankanews HLS Proxy
+#
+# 用法:
+#
+#   拉取预构建镜像
+#   docker compose up -d
+#
+#   本地构建
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+
+services:
+  kk-proxy:
+    image: ${IMAGE:-ghcr.io/conef404/kankanews-hls-proxy:latest}
+    container_name: kk-hls-proxy
+    restart: unless-stopped
+    ports:
+      - "${PORT:-53535}:3000"
+    environment:
+      - CHANNEL_ID=${CHANNEL_ID:-10}
+      - PORT=3000
+      - CAPTURE_INTERVAL=${CAPTURE_INTERVAL:-36000000}
+      # 缓存限制 (防止内存溢出)
+      - MAX_CACHE_SIZE=${MAX_CACHE_SIZE:-1073741824}
+      - MAX_CACHE_AGE=${MAX_CACHE_AGE:-1800}
+    volumes:
+      - kk-data:/app/data
+      - kk-cache:/app/seg-cache
+    security_opt:
+      - seccomp:unconfined
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  kk-data:
+  kk-cache:
