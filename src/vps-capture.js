@@ -11,60 +11,14 @@
  */
 
 const { chromium } = require('playwright');
-const fs = require('fs');
-const crypto = require('crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const { decodeUrl, parseJwt } = require('./signing');
 
 // ===== 配置 =====
 const CACHE_FILE = process.env.CACHE_FILE || '/tmp/kk-m3u8-cache.json';
 const CHANNEL_ID = process.env.CHANNEL_ID || '10';
 const PAGE_URL = `https://live.kankanews.com/huikan?id=${CHANNEL_ID}`;
-
-// ===== RSA 常量 =====
-const RSA_N = BigInt(
-  '0xcfe61ccf516e5115e136c414f5111077847648568b67fea6ad5a181cd5e6687f' +
-  '4f6a2a312514de8d99ae3ad590301a95f869ecca3fc01d8785898f8bb63b9e31' +
-  '0970edc33291a993b6a0d664b8d985d956bc90b82211000073161cf0981337eb' +
-  '9040da6c7a9e27fe8d6c02b4c9a28648175ec4b52a928170dc27bc838f9adcef'
-);
-const RSA_E = BigInt(0x10001);
-const RSA_BLOCK_SIZE = 128;
-
-function modPow(base, exp, mod) {
-  let result = 1n; base = base % mod;
-  while (exp > 0n) { if (exp % 2n === 1n) result = (result * base) % mod; exp = exp / 2n; base = (base * base) % mod; }
-  return result;
-}
-
-function decodeUrl(encodedStr) {
-  if (!encodedStr || typeof encodedStr !== 'string') return '';
-  const hex = Buffer.from(encodedStr, 'base64').toString('hex').toUpperCase();
-  let result = '';
-  for (let i = 0; i < hex.length; i += RSA_BLOCK_SIZE * 2) {
-    const chunkHex = hex.slice(i, i + RSA_BLOCK_SIZE * 2);
-    if (chunkHex.length < RSA_BLOCK_SIZE * 2) continue;
-    try {
-      const m = modPow(BigInt('0x' + chunkHex), RSA_E, RSA_N);
-      const decHex = m.toString(16).padStart(RSA_BLOCK_SIZE * 2, '0');
-      if (decHex.startsWith('0001')) {
-        let sep = -1;
-        for (let k = 4; k < decHex.length; k += 2) {
-          if (decHex.slice(k, k + 2) === '00') { sep = k; break; }
-        }
-        if (sep >= 12 && /^ff+$/i.test(decHex.slice(4, sep))) {
-          const dataHex = decHex.slice(sep + 2);
-          let str = '';
-          for (let j = 0; j < dataHex.length; j += 2) {
-            const code = parseInt(dataHex.slice(j, j + 2), 16);
-            if (code === 0) break;
-            str += String.fromCharCode(code);
-          }
-          result += str;
-        }
-      }
-    } catch {}
-  }
-  return result;
-}
 
 // ===== 主流程 =====
 async function capture() {
@@ -110,7 +64,7 @@ async function capture() {
     }
 
     const channelInfo = respData.result;
-    console.log(`  ✓ Channel info: ${channelInfo.name || channelId}`);
+    console.log(`  ✓ Channel info: ${channelInfo.name || CHANNEL_ID}`);
 
     // 调试: 输出 channel_info 的所有键
     const ci = channelInfo.channel_info;
@@ -155,7 +109,8 @@ async function capture() {
       const urlObj = new URL(m3u8Url);
       const token = urlObj.searchParams.get('token');
       if (token) {
-        const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+        const payload = parseJwt(token);
+        if (!payload) throw new Error('Invalid JWT payload');
         exp = payload.exp;
         streamName = payload.stream_name;
         userIp = payload.user_ip;
@@ -167,6 +122,7 @@ async function capture() {
 
     // 保存缓存
     const cache = { url: m3u8Url, exp, streamName, userIp, capturedAt: Math.floor(Date.now() / 1000), channelId: CHANNEL_ID };
+    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
     fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2));
     console.log(`  Saved to ${CACHE_FILE}`);
     return cache;

@@ -37,15 +37,15 @@ docker compose up -d
 | `/wx.m3u` | 全部频道 M3U 播放列表 |
 | `/?id=10` | 单频道 m3u8 直播流 |
 | `/status` | JSON 状态信息 |
-| `/url` | JSON 返回当前缓存的 m3u8 URL |
+| `/url` | JSON 返回当前缓存状态 (默认不暴露原始 m3u8 URL) |
 
 ## 部署场景
 
 ### 1. 服务器 / NAS / 电脑
 
 ```bash
-git clone https://github.com/c0nef/kankanews-hls-proxy.git
-cd kankanews-hls-proxy
+git clone https://github.com/c0nef/kankenews-hls-proxy.git
+cd kankenews-hls-proxy
 docker compose up -d
 ```
 
@@ -86,10 +86,13 @@ PotPlayer: `http://<NAS IP>:53535/wx.m3u` (频道列表)
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `CHANNEL_ID` | `10` | 默认频道 ID |
+| `CHANNEL_IDS` | `10` | 捕获频道列表,逗号分隔 (如 `1,2,4,5,9,10,11,12`) |
 | `PORT` | `3000` | 容器内端口 |
 | `CAPTURE_INTERVAL` | `36000000` | m3u8 捕获间隔 (毫秒, 默认 10 小时) |
+| `ALLOWED_SEGMENT_HOSTS` | `volc-stream.kksmg.com` | 允许代理的分片域名,逗号分隔 |
 | `MAX_CACHE_SIZE` | `1073741824` | 最大分片缓存 (字节, 默认 1GB) |
 | `MAX_CACHE_AGE` | `1800` | 缓存过期时间 (秒, 默认 30 分钟) |
+| `EXPOSE_RAW_URL` | `0` | 设为 `1` 时 `/url` 返回原始 m3u8 URL |
 
 ## 工作原理
 
@@ -115,7 +118,7 @@ curl http://localhost:53535/status
 docker compose logs -f
 
 # 手动刷新 m3u8
-docker compose exec kk-hls-proxy node src/vps-capture.js
+docker compose exec kk-proxy node src/vps-capture.js
 
 # 重启
 docker compose restart
