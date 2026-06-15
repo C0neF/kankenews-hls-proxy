@@ -112,18 +112,38 @@ async function capture() {
     const channelInfo = respData.result;
     console.log(`  ✓ Channel info: ${channelInfo.name || channelId}`);
 
+    // 调试: 输出 channel_info 的所有键
+    const ci = channelInfo.channel_info;
+    if (ci) {
+      console.log(`  channel_info keys: ${Object.keys(ci).join(', ')}`);
+      console.log(`  live_address length: ${(ci.live_address || '').length}`);
+      console.log(`  shift_address length: ${(ci.shift_address || '').length}`);
+    } else {
+      console.log(`  result keys: ${Object.keys(channelInfo).join(', ')}`);
+    }
+
     // 4. 解码流地址
-    const encoded = channelInfo.shift_address || channelInfo.live_address || '';
+    const encoded = (ci && (ci.shift_address || ci.live_address)) || channelInfo.shift_address || channelInfo.live_address || '';
     if (!encoded) {
       console.log('  WARNING: No encoded stream URL');
       return null;
     }
 
     console.log(`  Encoded stream URL length: ${encoded.length}`);
+    console.log(`  Encoded first 40 chars: ${encoded.substring(0, 40)}`);
     const m3u8Url = decodeUrl(encoded);
 
     if (!m3u8Url || !m3u8Url.startsWith('http')) {
-      console.log('  WARNING: RSA decode failed');
+      console.log('  WARNING: RSA decode failed, result length:', m3u8Url.length);
+      // 试用 channel_info 顶层字段
+      if (channelInfo.live_address) {
+        console.log('  Trying live_address directly...');
+        const alt = decodeUrl(channelInfo.live_address);
+        console.log('  live_address decode result length:', alt.length);
+        if (alt.startsWith('http')) {
+          console.log('  live_address worked:', alt.substring(0, 100));
+        }
+      }
       return null;
     }
 
