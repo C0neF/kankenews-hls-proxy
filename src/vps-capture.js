@@ -104,7 +104,7 @@ async function capture() {
 
     await browser.close();
 
-    if (!respData || respData.code !== 1000 || !respData.result) {
+    if (!respData || respData.code != 1000 || !respData.result) {
       console.log('  WARNING: channel/detail API failed:', JSON.stringify(respData).substring(0, 200));
       return null;
     }
