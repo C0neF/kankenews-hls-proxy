@@ -10,7 +10,7 @@
 
 services:
   kk-proxy:
-    image: ${IMAGE:-ghcr.io/conef404/kankanews-hls-proxy:latest}
+    image: ${IMAGE:-ghcr.io/c0nef/kankanews-hls-proxy:latest}
     container_name: kk-hls-proxy
     restart: unless-stopped
     ports:

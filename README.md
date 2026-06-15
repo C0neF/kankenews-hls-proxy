@@ -6,7 +6,7 @@
 
 ```bash
 # 1. 拉取镜像
-docker pull ghcr.io/conef404/kankenews-hls-proxy:latest
+docker pull ghcr.io/c0nef/kankenews-hls-proxy:latest
 
 # 2. 启动
 docker compose up -d
@@ -44,7 +44,7 @@ docker compose up -d
 ### 1. 服务器 / NAS / 电脑
 
 ```bash
-git clone https://github.com/conef404/kankanews-hls-proxy.git
+git clone https://github.com/c0nef/kankanews-hls-proxy.git
 cd kankanews-hls-proxy
 docker compose up -d
 ```
@@ -57,7 +57,7 @@ PotPlayer: `http://<设备IP>:53535/wx.m3u` (频道列表)
 opkg update && opkg install dockerd docker
 service dockerd start && service dockerd enable
 
-docker pull ghcr.io/conef404/kankenews-hls-proxy:latest
+docker pull ghcr.io/c0nef/kankenews-hls-proxy:latest
 docker run -d \
   --name kk-hls-proxy \
   --restart unless-stopped \
@@ -65,14 +65,14 @@ docker run -d \
   -e CHANNEL_ID=10 \
   -e MAX_CACHE_SIZE=268435456 \
   --security-opt seccomp=unconfined \
-  ghcr.io/conef404/kankenews-hls-proxy:latest
+  ghcr.io/c0nef/kankenews-hls-proxy:latest
 ```
 
 PotPlayer: `http://192.168.1.1:53535/wx.m3u` (频道列表)
 
 ### 3. 群晖 NAS
 
-1. **Container Manager** → **映像** → 拉取 `ghcr.io/conef404/kankenews-hls-proxy:latest`
+1. **Container Manager** → **映像** → 拉取 `ghcr.io/c0nef/kankenews-hls-proxy:latest`
 2. **容器** → 新建:
    - 端口: `53535` → `3000`
    - 环境变量: `CHANNEL_ID=10`
@@ -138,8 +138,8 @@ docker compose down
 推送到 `main` 或创建 tag 时自动构建 Docker 镜像:
 
 ```
-ghcr.io/conef404/kankenews-hls-proxy:latest
-ghcr.io/conef404/kankenews-hls-proxy:1.0.0
+ghcr.io/c0nef/kankenews-hls-proxy:latest
+ghcr.io/c0nef/kankenews-hls-proxy:1.0.0
 ```
 
 Fork 后使用:
