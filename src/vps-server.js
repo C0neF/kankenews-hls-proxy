@@ -17,13 +17,21 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { pipeline } = require('node:stream/promises');
+const { getDataDir, getDefaultChannelId, readCache: readCacheFile } = require('./cache-store');
+const {
+  buildSegmentResponseHeaders,
+  isAllowedSegmentUrl,
+  shouldCacheSegment,
+} = require('./segment-policy');
 
 // ===== 配置 =====
 const PORT = process.env.PORT || 3000;
-const DATA_DIR = process.env.CACHE_FILE ? path.dirname(process.env.CACHE_FILE) : '/app/data';
+const DATA_DIR = getDataDir();
 const SEG_CACHE_DIR = process.env.SEG_CACHE_DIR || '/tmp/kk-seg-cache';
 const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE) || 1024 * 1024 * 1024;
 const MAX_CACHE_AGE = parseInt(process.env.MAX_CACHE_AGE) || 1800;
+const DEFAULT_CHANNEL_ID = getDefaultChannelId();
+const EXPOSE_RAW_URL = process.env.EXPOSE_RAW_URL === '1';
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -89,19 +97,8 @@ async function cleanupCache() {
 }
 
 // ===== 多频道缓存读取 =====
-function getCacheFile(channelId) {
-  return path.join(DATA_DIR, `m3u8-cache-${channelId}.json`);
-}
-
-async function readCache(channelId = '10') {
-  // 优先读指定频道,回退到默认缓存文件
-  for (const f of [getCacheFile(channelId), path.join(DATA_DIR, 'm3u8-cache.json')]) {
-    try {
-      const data = await fsp.readFile(f, 'utf8');
-      return JSON.parse(data);
-    } catch {}
-  }
-  return null;
+async function readCache(channelId = DEFAULT_CHANNEL_ID) {
+  return readCacheFile(channelId, { dataDir: DATA_DIR, defaultChannelId: DEFAULT_CHANNEL_ID });
 }
 
 // ===== 流式 HTTPS 请求 =====
@@ -165,31 +162,38 @@ async function handleM3u8(req, res, cache, origin) {
 
 // ===== 分片代理 (流式 + 异步缓存 + 唯一临时文件) =====
 async function handleSegment(req, res, targetUrl) {
+  if (!isAllowedSegmentUrl(targetUrl)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    return res.end('segment URL host is not allowed');
+  }
+
+  const hasRange = !!req.headers['range'];
   const cacheKey = crypto.createHash('md5').update(targetUrl).digest('hex');
   const cacheFile = path.join(SEG_CACHE_DIR, `${cacheKey}.ts`);
 
   // 尝试缓存命中
-  try {
-    await fsp.access(cacheFile);
-    const stat = await fsp.stat(cacheFile);
-    res.writeHead(200, {
-      'Content-Type': 'video/mp2t',
-      'Accept-Ranges': 'bytes',
-      'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'public, max-age=3600',
-      'Content-Length': stat.size,
-      'X-Cache': 'HIT',
-    });
-    const stream = fs.createReadStream(cacheFile);
-    await pipeline(stream, res);
-    return;
-  } catch {
-    // 缓存未命中
+  if (!hasRange) {
+    try {
+      await fsp.access(cacheFile);
+      const stat = await fsp.stat(cacheFile);
+      res.writeHead(200, buildSegmentResponseHeaders({
+        contentType: 'video/mp2t',
+        acceptRanges: 'bytes',
+        contentLength: stat.size,
+        cacheControl: 'public, max-age=3600',
+        xCache: 'HIT',
+      }));
+      const stream = fs.createReadStream(cacheFile);
+      await pipeline(stream, res);
+      return;
+    } catch {
+      // 缓存未命中
+    }
   }
 
   // 从 CDN 流式获取
   const headers = { ...COMMON_HEADERS };
-  if (req.headers['range']) headers['Range'] = req.headers['range'];
+  if (hasRange) headers['Range'] = req.headers['range'];
 
   let upstream;
   try {
@@ -199,21 +203,15 @@ async function handleSegment(req, res, targetUrl) {
     return res.end(`upstream error: ${e.message}`);
   }
 
-  const respHeaders = {
-    'Content-Type': upstream.headers['content-type'] || 'video/mp2t',
-    'Accept-Ranges': upstream.headers['accept-ranges'] || 'bytes',
-    'Access-Control-Allow-Origin': '*',
-    'Cache-Control': 'public, max-age=300',
-    'X-Cache': 'MISS',
-  };
-  if (upstream.headers['content-length']) {
-    respHeaders['Content-Length'] = upstream.headers['content-length'];
-  }
-
-  res.writeHead(upstream.statusCode, respHeaders);
+  res.writeHead(upstream.statusCode, buildSegmentResponseHeaders({
+    contentType: upstream.headers['content-type'],
+    acceptRanges: upstream.headers['accept-ranges'],
+    contentLength: upstream.headers['content-length'],
+    contentRange: upstream.headers['content-range'],
+  }));
 
   const contentLength = parseInt(upstream.headers['content-length'] || '0', 10);
-  if (contentLength > 0 && contentLength < 10 * 1024 * 1024) {
+  if (shouldCacheSegment({ hasRange, statusCode: upstream.statusCode, contentLength })) {
     // 需要缓存: 唯一临时文件名避免并发冲突,完成后原子 rename
     const tmpFile = `${cacheFile}.${crypto.randomUUID()}.tmp`;
     const cacheWriteStream = fs.createWriteStream(tmpFile);
@@ -297,7 +295,13 @@ const server = http.createServer(async (req, res) => {
     // m3u8 URL (JSON)
     if (url.pathname === '/url') {
       const cache = await readCache(channelId);
-      const result = JSON.stringify({ channelId, m3u8: cache?.url || null, exp: cache?.exp || null });
+      const result = JSON.stringify({
+        channelId,
+        hasUrl: !!cache?.url,
+        m3u8: EXPOSE_RAW_URL ? cache?.url || null : null,
+        exp: cache?.exp || null,
+        streamName: cache?.streamName || null,
+      });
       res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(result) });
       return res.end(result);
     }

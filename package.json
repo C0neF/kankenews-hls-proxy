@@ -5,9 +5,10 @@
   "description": "kankanews HLS proxy for PotPlayer",
   "scripts": {
     "start": "node src/vps-server.js",
-    "capture": "node src/vps-capture.js"
+    "capture": "node src/vps-capture.js",
+    "test": "node --test"
   },
   "devDependencies": {
-    "playwright": "^1.40.0"
+    "playwright": "1.61.0"
   }
 }

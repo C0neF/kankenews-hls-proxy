@@ -10,15 +10,18 @@
 
 services:
   kk-proxy:
-    image: ${IMAGE:-ghcr.io/c0nef/kankanews-hls-proxy:latest}
+    image: ${IMAGE:-ghcr.io/c0nef/kankenews-hls-proxy:latest}
     container_name: kk-hls-proxy
     restart: unless-stopped
     ports:
       - "${PORT:-53535}:3000"
     environment:
       - CHANNEL_ID=${CHANNEL_ID:-10}
+      - CHANNEL_IDS=${CHANNEL_IDS:-10}
       - PORT=3000
       - CAPTURE_INTERVAL=${CAPTURE_INTERVAL:-36000000}
+      - ALLOWED_SEGMENT_HOSTS=${ALLOWED_SEGMENT_HOSTS:-volc-stream.kksmg.com}
+      - EXPOSE_RAW_URL=${EXPOSE_RAW_URL:-0}
       # 缓存限制 (防止内存溢出)
       - MAX_CACHE_SIZE=${MAX_CACHE_SIZE:-1073741824}
       - MAX_CACHE_AGE=${MAX_CACHE_AGE:-1800}
@@ -28,7 +31,7 @@ services:
     security_opt:
       - seccomp:unconfined
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/status"]
+      test: ["CMD", "node", "src/healthcheck.js"]
       interval: 30s
       timeout: 10s
       retries: 3

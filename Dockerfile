@@ -24,8 +24,8 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Install dependencies
-COPY package.json ./
-RUN npm install && npx playwright install chromium && npx playwright install-deps chromium
+COPY package.json package-lock.json ./
+RUN npm ci && npx playwright install chromium && npx playwright install-deps chromium
 
 # Copy source
 COPY src/ ./src/
