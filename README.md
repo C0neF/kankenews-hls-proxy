@@ -63,6 +63,7 @@ docker run -d \
   --restart unless-stopped \
   -p 53535:3000 \
   -e CHANNEL_ID=10 \
+  -e CHANNEL_IDS=1,2,4,5,9,10,11,12 \
   -e MAX_CACHE_SIZE=268435456 \
   --security-opt seccomp=unconfined \
   ghcr.io/c0nef/kankenews-hls-proxy:latest
@@ -76,6 +77,7 @@ PotPlayer: `http://192.168.1.1:53535/wx.m3u` (频道列表)
 2. **容器** → 新建:
    - 端口: `53535` → `3000`
    - 环境变量: `CHANNEL_ID=10`
+   - 环境变量: `CHANNEL_IDS=1,2,4,5,9,10,11,12`
    - 高级设置: `--security-opt seccomp=unconfined`
 3. 启动
 
@@ -86,7 +88,7 @@ PotPlayer: `http://<NAS IP>:53535/wx.m3u` (频道列表)
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `CHANNEL_ID` | `10` | 默认频道 ID |
-| `CHANNEL_IDS` | `10` | 捕获频道列表,逗号分隔 (如 `1,2,4,5,9,10,11,12`) |
+| `CHANNEL_IDS` | `1,2,4,5,9,10,11,12` | 捕获频道列表,逗号分隔；只抓单频道时设为 `10` |
 | `PORT` | `3000` | 容器内端口 |
 | `CAPTURE_INTERVAL` | `36000000` | m3u8 捕获间隔 (毫秒, 默认 10 小时) |
 | `ALLOWED_SEGMENT_HOSTS` | `volc-stream.kksmg.com` | 允许代理的分片域名,逗号分隔 |

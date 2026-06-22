@@ -20,6 +20,15 @@ test('README and compose commands use the GitHub repository image and service na
   assert.match(readme, /docker compose exec kk-proxy node src\/vps-capture\.js/);
 });
 
+test('Docker defaults capture every channel listed in the playlist', () => {
+  const compose = fs.readFileSync('docker-compose.yml', 'utf8');
+  const entrypoint = fs.readFileSync('docker-entrypoint.sh', 'utf8');
+  const expectedChannelIds = '1,2,4,5,9,10,11,12';
+
+  assert.match(compose, new RegExp(`CHANNEL_IDS=\\$\\{CHANNEL_IDS:-${expectedChannelIds}\\}`));
+  assert.match(entrypoint, new RegExp(`CHANNEL_IDS=\\$\\{CHANNEL_IDS:-${expectedChannelIds}\\}`));
+});
+
 test('Docker healthcheck does not depend on missing curl', () => {
   const dockerfile = fs.readFileSync('Dockerfile', 'utf8');
   const compose = fs.readFileSync('docker-compose.yml', 'utf8');
