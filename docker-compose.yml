@@ -20,7 +20,7 @@ services:
       - CHANNEL_IDS=${CHANNEL_IDS:-1,2,4,5,9,10,11,12}
       - PORT=53535
       - CAPTURE_INTERVAL=${CAPTURE_INTERVAL:-36000000}
-      - ALLOWED_SEGMENT_HOSTS=${ALLOWED_SEGMENT_HOSTS:-volc-stream.kksmg.com}
+      - ALLOWED_SEGMENT_HOSTS=${ALLOWED_SEGMENT_HOSTS:-volc-stream.kksmg.com,ws-channels.kksmg.com,tencent-stream.kksmg.com}
       - EXPOSE_RAW_URL=${EXPOSE_RAW_URL:-0}
       # 缓存限制 (防止内存溢出)
       - MAX_CACHE_SIZE=${MAX_CACHE_SIZE:-1073741824}

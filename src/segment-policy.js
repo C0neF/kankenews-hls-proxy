@@ -1,4 +1,8 @@
-const DEFAULT_ALLOWED_SEGMENT_HOSTS = ['volc-stream.kksmg.com'];
+const DEFAULT_ALLOWED_SEGMENT_HOSTS = [
+  'volc-stream.kksmg.com',
+  'ws-channels.kksmg.com',
+  'tencent-stream.kksmg.com',
+];
 const MAX_CACHEABLE_SEGMENT_BYTES = 10 * 1024 * 1024;
 
 function getAllowedSegmentHosts(value = process.env.ALLOWED_SEGMENT_HOSTS) {

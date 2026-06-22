@@ -9,6 +9,8 @@ const {
 
 test('segment proxy allows only configured HTTPS hosts', () => {
   assert.equal(isAllowedSegmentUrl('https://volc-stream.kksmg.com/live/1.ts'), true);
+  assert.equal(isAllowedSegmentUrl('https://ws-channels.kksmg.com/live/ylpd/1.ts'), true);
+  assert.equal(isAllowedSegmentUrl('https://tencent-stream.kksmg.com/live/shanghaieye-1.ts'), true);
   assert.equal(isAllowedSegmentUrl('http://volc-stream.kksmg.com/live/1.ts'), false);
   assert.equal(isAllowedSegmentUrl('https://example.com/live/1.ts'), false);
   assert.equal(isAllowedSegmentUrl('not a url'), false);

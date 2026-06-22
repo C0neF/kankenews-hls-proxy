@@ -91,7 +91,7 @@ PotPlayer: `http://<NAS IP>:53535/wx.m3u` (频道列表)
 | `CHANNEL_IDS` | `1,2,4,5,9,10,11,12` | 捕获频道列表,逗号分隔；只抓单频道时设为 `10` |
 | `PORT` | `53535` | 容器内端口 |
 | `CAPTURE_INTERVAL` | `36000000` | m3u8 捕获间隔 (毫秒, 默认 10 小时) |
-| `ALLOWED_SEGMENT_HOSTS` | `volc-stream.kksmg.com` | 允许代理的分片域名,逗号分隔 |
+| `ALLOWED_SEGMENT_HOSTS` | `volc-stream.kksmg.com,ws-channels.kksmg.com,tencent-stream.kksmg.com` | 允许代理的分片域名,逗号分隔 |
 | `MAX_CACHE_SIZE` | `1073741824` | 最大分片缓存 (字节, 默认 1GB) |
 | `MAX_CACHE_AGE` | `1800` | 缓存过期时间 (秒, 默认 30 分钟) |
 | `EXPOSE_RAW_URL` | `0` | 设为 `1` 时 `/url` 返回原始 m3u8 URL |
@@ -107,7 +107,7 @@ flowchart TB
 
   capture --> proxy
   proxy --> ip["出口 IP = JWT user_ip ✅"]
-  ip --> cdn["CDN (volc-stream.kksmg.com)<br/>IP 校验通过 ✅"]
+  ip --> cdn["CDN (volc/ws/tencent)<br/>IP 校验通过 ✅"]
 ```
 
 ## 管理
