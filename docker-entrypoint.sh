@@ -11,6 +11,7 @@ set -e
 CAPTURE_INTERVAL=${CAPTURE_INTERVAL:-36000000}
 CHANNEL_ID=${CHANNEL_ID:-10}
 CHANNEL_IDS=${CHANNEL_IDS:-1,2,4,5,9,10,11,12}
+PORT=${PORT:-53535}
 CACHE_FILE=${CACHE_FILE:-/app/data/m3u8-cache.json}
 CACHE_DIR=$(dirname "$CACHE_FILE")
 MAX_RETRIES=5
@@ -22,7 +23,7 @@ echo "========================================="
 echo ""
 echo "  Channel ID:     ${CHANNEL_ID}"
 echo "  Channel IDs:    ${CHANNEL_IDS}"
-echo "  Port:           ${PORT:-3000}"
+echo "  Port:           ${PORT}"
 echo "  Capture Every:  ${CAPTURE_INTERVAL}ms (~$((CAPTURE_INTERVAL / 3600000))h)"
 echo ""
 
@@ -69,7 +70,7 @@ echo "[Capture] Starting periodic capture (every ${CAPTURE_INTERVAL}ms)..."
 CAPTURE_PID=$!
 
 # 启动代理服务器
-echo "[Server] Starting proxy on port ${PORT:-3000}..."
+echo "[Server] Starting proxy on port ${PORT}..."
 node src/vps-server.js &
 SERVER_PID=$!
 
@@ -85,7 +86,7 @@ trap cleanup SIGTERM SIGINT
 
 echo ""
 echo "========================================="
-echo " Ready! PotPlayer: http://localhost:${PORT:-3000}/"
+echo " Ready! PotPlayer: http://localhost:${PORT}/"
 echo "========================================="
 echo ""
 

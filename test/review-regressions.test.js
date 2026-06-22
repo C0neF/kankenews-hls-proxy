@@ -29,6 +29,25 @@ test('Docker defaults capture every channel listed in the playlist', () => {
   assert.match(entrypoint, new RegExp(`CHANNEL_IDS=\\$\\{CHANNEL_IDS:-${expectedChannelIds}\\}`));
 });
 
+test('Docker container listens on port 53535 internally', () => {
+  const dockerfile = fs.readFileSync('Dockerfile', 'utf8');
+  const compose = fs.readFileSync('docker-compose.yml', 'utf8');
+  const entrypoint = fs.readFileSync('docker-entrypoint.sh', 'utf8');
+  const readme = fs.readFileSync('README.md', 'utf8');
+  const server = fs.readFileSync('src/vps-server.js', 'utf8');
+  const healthcheck = fs.readFileSync('src/healthcheck.js', 'utf8');
+
+  assert.match(dockerfile, /^ENV PORT=53535$/m);
+  assert.match(dockerfile, /^EXPOSE 53535$/m);
+  assert.match(compose, /"\$\{PORT:-53535\}:53535"/);
+  assert.match(compose, /PORT=53535/);
+  assert.doesNotMatch(entrypoint, /PORT:-3000/);
+  assert.match(server, /process\.env\.PORT \|\| 53535/);
+  assert.match(healthcheck, /process\.env\.PORT \|\| 53535/);
+  assert.match(readme, /-p 53535:53535/);
+  assert.match(readme, /`PORT` \| `53535`/);
+});
+
 test('Docker healthcheck does not depend on missing curl', () => {
   const dockerfile = fs.readFileSync('Dockerfile', 'utf8');
   const compose = fs.readFileSync('docker-compose.yml', 'utf8');

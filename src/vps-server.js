@@ -25,7 +25,7 @@ const {
 } = require('./segment-policy');
 
 // ===== 配置 =====
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 53535;
 const DATA_DIR = getDataDir();
 const SEG_CACHE_DIR = process.env.SEG_CACHE_DIR || '/tmp/kk-seg-cache';
 const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE) || 1024 * 1024 * 1024;

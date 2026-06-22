@@ -14,11 +14,11 @@ services:
     container_name: kk-hls-proxy
     restart: unless-stopped
     ports:
-      - "${PORT:-53535}:3000"
+      - "${PORT:-53535}:53535"
     environment:
       - CHANNEL_ID=${CHANNEL_ID:-10}
       - CHANNEL_IDS=${CHANNEL_IDS:-1,2,4,5,9,10,11,12}
-      - PORT=3000
+      - PORT=53535
       - CAPTURE_INTERVAL=${CAPTURE_INTERVAL:-36000000}
       - ALLOWED_SEGMENT_HOSTS=${ALLOWED_SEGMENT_HOSTS:-volc-stream.kksmg.com}
       - EXPOSE_RAW_URL=${EXPOSE_RAW_URL:-0}

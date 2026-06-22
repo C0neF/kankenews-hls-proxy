@@ -1,6 +1,6 @@
 const http = require('node:http');
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 53535;
 
 const req = http.get(`http://127.0.0.1:${port}/status`, (res) => {
   let body = '';

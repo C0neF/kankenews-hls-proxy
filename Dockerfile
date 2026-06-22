@@ -34,13 +34,13 @@ COPY src/ ./src/
 RUN mkdir -p /app/seg-cache /app/data
 
 # Environment
-ENV PORT=3000
+ENV PORT=53535
 ENV CACHE_FILE=/app/data/m3u8-cache.json
 ENV SEG_CACHE_DIR=/app/seg-cache
 ENV CHANNEL_ID=10
 ENV CAPTURE_INTERVAL=36000000
 
-EXPOSE 3000
+EXPOSE 53535
 
 # Start script
 COPY docker-entrypoint.sh ./
