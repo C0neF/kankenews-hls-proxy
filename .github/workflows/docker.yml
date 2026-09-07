@@ -34,6 +34,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Test capture and proxy behavior
+        run: |
+          npm ci
+          npm test
+          bash -n docker-entrypoint.sh
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 

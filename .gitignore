@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Local reference userscript
+/te.js
+
 # Cache files
 /tmp/
 seg_cache/

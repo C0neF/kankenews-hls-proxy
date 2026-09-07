@@ -1,3 +1,5 @@
+const { createHmac, randomBytes, timingSafeEqual } = require('node:crypto');
+
 const DEFAULT_ALLOWED_SEGMENT_HOSTS = [
   'volc-stream.kksmg.com',
   'ws-channels.kksmg.com',
@@ -20,6 +22,36 @@ function isAllowedSegmentUrl(rawUrl, allowedHosts = getAllowedSegmentHosts()) {
   } catch {
     return false;
   }
+}
+
+function createPlaylistSegmentAuthorizer() {
+  const key = randomBytes(32);
+  const signatureFor = url => createHmac('sha256', key).update(url).digest('hex');
+  function isWangsuSegment(rawUrl) {
+    try {
+      const url = new URL(rawUrl);
+      return url.protocol === 'https:' && !url.port && !url.username && !url.password &&
+        /^[a-z0-9-]+\.100ycdn\.com$/i.test(url.hostname);
+    } catch {
+      return false;
+    }
+  }
+  function verify(targetUrl, signature) {
+    if (!isWangsuSegment(targetUrl) || !/^[a-f0-9]{64}$/.test(signature || '')) return false;
+    return timingSafeEqual(Buffer.from(signatureFor(targetUrl), 'hex'), Buffer.from(signature, 'hex'));
+  }
+  return {
+    sign(targetUrl, playlistUrl, parentSignature) {
+      try {
+        const trustedRoot = new URL(playlistUrl).hostname === 'ws-channels.kksmg.com' && isAllowedSegmentUrl(playlistUrl);
+        if ((!trustedRoot && !verify(playlistUrl, parentSignature)) || !isWangsuSegment(targetUrl)) return null;
+        return signatureFor(targetUrl);
+      } catch {
+        return null;
+      }
+    },
+    verify,
+  };
 }
 
 function shouldCacheSegment({ hasRange, statusCode, contentLength, maxBytes = MAX_CACHEABLE_SEGMENT_BYTES }) {
@@ -52,6 +84,7 @@ module.exports = {
   DEFAULT_ALLOWED_SEGMENT_HOSTS,
   MAX_CACHEABLE_SEGMENT_BYTES,
   buildSegmentResponseHeaders,
+  createPlaylistSegmentAuthorizer,
   getAllowedSegmentHosts,
   isAllowedSegmentUrl,
   shouldCacheSegment,

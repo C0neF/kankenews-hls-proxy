@@ -7,10 +7,11 @@
  */
 
 const { createHash } = require('node:crypto');
+const { USER_AGENT } = require('./http-headers');
 
 // ===== 常量 =====
 const SIGN_SECRET = '28c8edde3d61a0411511d3b1866f0636';
-const APP_VERSION = '2.41.9';
+const APP_VERSION = '2.42.23';
 
 // RSA 公钥分量 (从 SPKI 格式提取)
 // 原始 PEM:
@@ -184,7 +185,6 @@ function parseJwt(token) {
 
 // ===== KAPI 调用 =====
 const https = require('node:https');
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const KAPI_BASE = 'https://kapi.kankanews.com';
 
 /**
@@ -208,7 +208,7 @@ function kapiGet(path, params = {}) {
   return new Promise((resolve, reject) => {
     https.get(
       url.href,
-      { headers: { ...headers, 'User-Agent': UA } },
+      { headers: { ...headers, 'User-Agent': USER_AGENT } },
       res => {
         let data = '';
         res.on('data', d => (data += d));

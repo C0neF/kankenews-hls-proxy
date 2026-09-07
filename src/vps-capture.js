@@ -1,148 +1,77 @@
-/**
- * vps-capture.js - 使用 Playwright 捕获 kankanews m3u8 URL
- *
- * 策略:
- *   1. 打开 kankanews 页面 (获得正确的 IP/浏览器指纹)
- *   2. 在页面上下文中直接调用 kapi API (自动携带签名)
- *   3. 从 API 响应中提取加密流地址
- *   4. 在 Node.js 中 RSA 解码得到 m3u8 URL
- *
- *   不依赖播放器初始化,不需要拦截网络请求。
- */
-
 const { chromium } = require('playwright');
-const fs = require('node:fs');
+const fs = require('node:fs/promises');
 const path = require('node:path');
-const { decodeUrl, parseJwt } = require('./signing');
+const { randomUUID } = require('node:crypto');
+const { signRequest } = require('./signing');
+const { getCacheFile, getDefaultChannelId } = require('./cache-store');
+const { USER_AGENT, COMMON_HEADERS } = require('./http-headers');
+const { resolveStreamSource } = require('./stream-source');
 
-// ===== 配置 =====
-const CACHE_FILE = process.env.CACHE_FILE || '/tmp/kk-m3u8-cache.json';
-const CHANNEL_ID = process.env.CHANNEL_ID || '10';
-const PAGE_URL = `https://live.kankanews.com/huikan?id=${CHANNEL_ID}`;
-
-// ===== 主流程 =====
-async function capture() {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] Starting capture for channel ${CHANNEL_ID}...`);
-
-  const browser = await chromium.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+async function validateStream(url) {
+  const response = await fetch(url, {
+    headers: COMMON_HEADERS,
+    redirect: 'manual',
+    signal: AbortSignal.timeout(10000),
   });
+  if (response.status !== 200) {
+    await response.body?.cancel();
+    return false;
+  }
+  return (await response.text()).trimStart().startsWith('#EXTM3U');
+}
 
-  const context = await browser.newContext({
-    userAgent:
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-      '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-    locale: 'zh-CN',
-  });
-
-  const page = await context.newPage();
-
+async function capture(options = {}) {
+  const channelId = String(options.channelId || getDefaultChannelId());
+  const cacheFile = options.cacheFile || getCacheFile(channelId);
+  const log = message => console.log(`  [${channelId}] ${message}`);
+  let browser;
+  let temporaryFile;
+  console.log(`[${new Date().toISOString()}] Starting capture for channel ${channelId}...`);
   try {
-    // 1. 先注册 response 拦截 (在页面导航之前)
-    //    用 waitForResponse 在页面自己消费响应之前拿到数据
-    const channelDetailPromise = page.waitForResponse(
-      (resp) => resp.url().includes('/content/pc/tv/channel/detail'),
-      { timeout: 30000 }
-    );
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+    const context = await browser.newContext({ userAgent: USER_AGENT, locale: 'zh-CN' });
+    const page = await context.newPage();
+    await page.goto(`https://live.kankanews.com/huikan?id=${encodeURIComponent(channelId)}`, {
+      waitUntil: 'domcontentloaded', timeout: 30000,
+    });
 
-    // 2. 打开页面 (页面 JS 会自动调 kapi,带签名)
-    console.log('  Opening page...');
-    await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    console.log('  Page loaded, waiting for kapi response...');
+    // Keep API requests in the browser; stream tokens bind both the IP and User-Agent.
+    const apiGet = (endpoint, params) => page.evaluate(async ({ endpoint, params, headers }) => {
+      const response = await fetch(`https://kapi.kankanews.com${endpoint}?${new URLSearchParams(params)}`, {
+        headers: { ...headers, Accept: 'application/json', 'M-Uuid': localStorage.getItem('uuid') || '' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!response.ok) throw new Error(`API HTTP ${response.status}`);
+      return response.json();
+    }, { endpoint, params, headers: signRequest(params) });
 
-    // 3. 拦截响应 (页面自己的 axios 发出的,带完整签名)
-    const channelResp = await channelDetailPromise;
-    const respData = await channelResp.json().catch(() => null);
-
-    await browser.close();
-
-    if (!respData || respData.code != 1000 || !respData.result) {
-      console.log('  WARNING: channel/detail API failed:', JSON.stringify(respData).substring(0, 200));
+    const stream = await resolveStreamSource({ channelId, apiGet, validateStream, log });
+    if (!stream) {
+      log('No playable source found; keeping the previous cache.');
       return null;
     }
-
-    const channelInfo = respData.result;
-    console.log(`  ✓ Channel info: ${channelInfo.name || CHANNEL_ID}`);
-
-    // 调试: 输出 channel_info 的所有键
-    const ci = channelInfo.channel_info;
-    if (ci) {
-      console.log(`  channel_info keys: ${Object.keys(ci).join(', ')}`);
-      console.log(`  live_address length: ${(ci.live_address || '').length}`);
-      console.log(`  shift_address length: ${(ci.shift_address || '').length}`);
-    } else {
-      console.log(`  result keys: ${Object.keys(channelInfo).join(', ')}`);
-    }
-
-    // 4. 解码流地址
-    const encoded = (ci && (ci.shift_address || ci.live_address)) || channelInfo.shift_address || channelInfo.live_address || '';
-    if (!encoded) {
-      console.log('  WARNING: No encoded stream URL');
-      return null;
-    }
-
-    console.log(`  Encoded stream URL length: ${encoded.length}`);
-    console.log(`  Encoded first 40 chars: ${encoded.substring(0, 40)}`);
-    const m3u8Url = decodeUrl(encoded);
-
-    if (!m3u8Url || !m3u8Url.startsWith('http')) {
-      console.log('  WARNING: RSA decode failed, result length:', m3u8Url.length);
-      // 试用 channel_info 顶层字段
-      if (channelInfo.live_address) {
-        console.log('  Trying live_address directly...');
-        const alt = decodeUrl(channelInfo.live_address);
-        console.log('  live_address decode result length:', alt.length);
-        if (alt.startsWith('http')) {
-          console.log('  live_address worked:', alt.substring(0, 100));
-        }
-      }
-      return null;
-    }
-
-    console.log(`  Decoded m3u8: ${m3u8Url.substring(0, 120)}...`);
-
-    // 解析 JWT
-    let exp = null, streamName = null, userIp = null;
-    try {
-      const urlObj = new URL(m3u8Url);
-      const token = urlObj.searchParams.get('token');
-      if (token) {
-        const payload = parseJwt(token);
-        if (!payload) throw new Error('Invalid JWT payload');
-        exp = payload.exp;
-        streamName = payload.stream_name;
-        userIp = payload.user_ip;
-        console.log(`  JWT exp: ${new Date(exp * 1000).toISOString()}`);
-        console.log(`  JWT stream: ${streamName}`);
-        console.log(`  JWT user_ip: ${userIp}`);
-      }
-    } catch {}
-
-    // 保存缓存
-    const cache = { url: m3u8Url, exp, streamName, userIp, capturedAt: Math.floor(Date.now() / 1000), channelId: CHANNEL_ID };
-    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2));
-    console.log(`  Saved to ${CACHE_FILE}`);
+    const cache = { ...stream, capturedAt: Math.floor(Date.now() / 1000), channelId };
+    await fs.mkdir(path.dirname(cacheFile), { recursive: true });
+    temporaryFile = `${cacheFile}.${randomUUID()}.tmp`;
+    await fs.writeFile(temporaryFile, JSON.stringify(cache, null, 2));
+    await fs.rename(temporaryFile, cacheFile);
+    log(`Saved ${stream.source} ${stream.sourceType} to ${cacheFile}`);
+    log(`Expires: ${cache.exp ? new Date(cache.exp * 1000).toISOString() : 'unknown'}`);
     return cache;
-
-  } catch (e) {
-    console.error('  Error:', e.message);
-    await browser.close();
+  } catch (error) {
+    log(`Capture failed: ${error.message}`);
     return null;
+  } finally {
+    if (temporaryFile) await fs.unlink(temporaryFile).catch(() => {});
+    if (browser) await browser.close().catch(() => {});
   }
 }
 
 if (require.main === module) {
-  capture().then((result) => {
-    if (result) {
-      console.log(`\nDone! Expires: ${result.exp ? new Date(result.exp * 1000).toISOString() : 'unknown'}`);
-    } else {
-      console.log('\nFailed to capture m3u8 URL');
-      process.exit(1);
-    }
-  });
+  capture().then(result => { if (!result) process.exitCode = 1; });
 }
 
-module.exports = { capture };
+module.exports = { capture, validateStream };

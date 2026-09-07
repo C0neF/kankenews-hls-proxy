@@ -18,8 +18,11 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { pipeline } = require('node:stream/promises');
 const { getDataDir, getDefaultChannelId, readCache: readCacheFile } = require('./cache-store');
+const { COMMON_HEADERS } = require('./http-headers');
+const { isPlaylistUrl, isPlaylistContentType, rewritePlaylist } = require('./hls-playlist');
 const {
   buildSegmentResponseHeaders,
+  createPlaylistSegmentAuthorizer,
   isAllowedSegmentUrl,
   shouldCacheSegment,
 } = require('./segment-policy');
@@ -32,15 +35,7 @@ const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE) || 1024 * 1024 * 102
 const MAX_CACHE_AGE = parseInt(process.env.MAX_CACHE_AGE) || 1800;
 const DEFAULT_CHANNEL_ID = getDefaultChannelId();
 const EXPOSE_RAW_URL = process.env.EXPOSE_RAW_URL === '1';
-const UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-  '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-
-const COMMON_HEADERS = {
-  Referer: 'https://live.kankanews.com/',
-  Origin: 'https://live.kankanews.com',
-  'User-Agent': UA,
-};
+const segmentAuthorizer = createPlaylistSegmentAuthorizer();
 
 // ===== 频道列表 =====
 const CHANNELS = [
@@ -117,16 +112,18 @@ function httpsStream(url, headers) {
 function httpsBuffer(url, headers) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
-    https.get(
+    const request = https.get(
       { hostname: u.hostname, path: u.pathname + u.search, headers },
       (res) => {
         const chunks = [];
+        res.on('error', reject);
         res.on('data', (d) => chunks.push(d));
         res.on('end', () =>
           resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) })
         );
       }
     ).on('error', reject);
+    request.setTimeout(30000, () => request.destroy(new Error('timeout')));
   });
 }
 
@@ -139,18 +136,11 @@ async function handleM3u8(req, res, cache, origin) {
     return res.end(`upstream ${resp.status}`);
   }
 
-  const body = resp.body.toString();
-  const lines = body.split(/\r?\n/);
-  const rewritten = lines.map((line) => {
-    const t = line.trim();
-    if (!t || t.startsWith('#')) return line;
-    let abs;
-    try { abs = new URL(t, cache.url).href; } catch { return line; }
-    if (abs.startsWith(origin)) return line;
-    return `${origin}/seg?u=${encodeURIComponent(abs)}`;
-  });
+  return sendPlaylist(res, resp.body.toString(), cache.url, origin, cache.signature);
+}
 
-  const result = rewritten.join('\n');
+function sendPlaylist(res, body, playlistUrl, origin, signature) {
+  const result = rewritePlaylist(body, playlistUrl, origin, segmentAuthorizer, signature);
   res.writeHead(200, {
     'Content-Type': 'application/vnd.apple.mpegurl',
     'Access-Control-Allow-Origin': '*',
@@ -161,10 +151,16 @@ async function handleM3u8(req, res, cache, origin) {
 }
 
 // ===== 分片代理 (流式 + 异步缓存 + 唯一临时文件) =====
-async function handleSegment(req, res, targetUrl) {
-  if (!isAllowedSegmentUrl(targetUrl)) {
+async function handleSegment(req, res, targetUrl, signature) {
+  if (!isAllowedSegmentUrl(targetUrl) && !segmentAuthorizer.verify(targetUrl, signature)) {
     res.writeHead(403, { 'Content-Type': 'text/plain' });
     return res.end('segment URL host is not allowed');
+  }
+
+  const proto = req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http');
+  const origin = `${proto}://${req.headers.host}`;
+  if (isPlaylistUrl(targetUrl)) {
+    return handleM3u8(req, res, { url: targetUrl, signature }, origin);
   }
 
   const hasRange = !!req.headers['range'];
@@ -201,6 +197,12 @@ async function handleSegment(req, res, targetUrl) {
   } catch (e) {
     res.writeHead(502, { 'Content-Type': 'text/plain' });
     return res.end(`upstream error: ${e.message}`);
+  }
+
+  if (upstream.statusCode === 200 && isPlaylistContentType(upstream.headers['content-type'])) {
+    const chunks = [];
+    for await (const chunk of upstream) chunks.push(chunk);
+    return sendPlaylist(res, Buffer.concat(chunks).toString(), targetUrl, origin, signature);
   }
 
   res.writeHead(upstream.statusCode, buildSegmentResponseHeaders({
@@ -308,7 +310,7 @@ const server = http.createServer(async (req, res) => {
 
     // 分片代理 (流式)
     if (url.pathname === '/seg' && url.searchParams.has('u')) {
-      return handleSegment(req, res, url.searchParams.get('u'));
+      return await handleSegment(req, res, url.searchParams.get('u'), url.searchParams.get('sig'));
     }
 
     // 频道列表 M3U (/wx.m3u 不带 ?id=)
@@ -345,7 +347,7 @@ const server = http.createServer(async (req, res) => {
 
       const proto = req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http');
       const origin = `${proto}://${req.headers.host}`;
-      return handleM3u8(req, res, cache, origin);
+      return await handleM3u8(req, res, cache, origin);
     }
 
     // 404

@@ -90,7 +90,7 @@ PotPlayer: `http://<NAS IP>:53535/wx.m3u` (频道列表)
 | `CHANNEL_ID` | `10` | 默认频道 ID |
 | `CHANNEL_IDS` | `1,2,4,5,9,10,11,12` | 捕获频道列表,逗号分隔；只抓单频道时设为 `10` |
 | `PORT` | `53535` | 容器内端口 |
-| `CAPTURE_INTERVAL` | `36000000` | m3u8 捕获间隔 (毫秒, 默认 10 小时) |
+| `CAPTURE_INTERVAL` | `36000000` | 最长刷新间隔 (毫秒, 默认 10 小时)；地址将在过期前 5 分钟提前刷新 |
 | `ALLOWED_SEGMENT_HOSTS` | `volc-stream.kksmg.com,ws-channels.kksmg.com,tencent-stream.kksmg.com` | 允许代理的分片域名,逗号分隔 |
 | `MAX_CACHE_SIZE` | `1073741824` | 最大分片缓存 (字节, 默认 1GB) |
 | `MAX_CACHE_AGE` | `1800` | 缓存过期时间 (秒, 默认 30 分钟) |
@@ -98,15 +98,25 @@ PotPlayer: `http://<NAS IP>:53535/wx.m3u` (频道列表)
 
 ## 工作原理
 
+服务启动后立即监听端口，后台依次抓取全部配置频道。频道详情没有有效地址时，参考 `te.js` 的补源流程，查询当天及过去 7 天的节目列表，逐个尝试可用节目的详情地址；不会修改接口返回的节目权限字段。
+
+直播和回看地址都会尝试，回看地址会移除 `start`、`end` 参数作为直播源使用。地址必须未过期且实际返回 HLS 清单才会写入缓存。浏览器抓取与分片代理使用相同的 User-Agent，因为当前播放令牌同时绑定出口 IP 和 User-Agent。
+
+每 30 秒检查各频道缓存，过期前 5 分钟或达到 `CAPTURE_INTERVAL` 时刷新。失败保留旧缓存，约 60 秒后重试；多频道串行抓取时，重试会等待当前频道完成。首次抓取完成前，频道列表可能暂时显示“未捕获”。
+
+都市频道清单中的动态 `100ycdn.com` 分片使用代理生成的签名授权，无需向 `ALLOWED_SEGMENT_HOSTS` 添加通配域名；未经签名的动态地址仍会被拒绝。
+
+主清单、子清单及 `URI` 属性中的密钥、初始化分片地址都会经过代理改写。补源优先寻找长期有效的回看地址；找到可播放的直播地址后，最多再用约 15 秒寻找回看源，避免不可回看的频道拖延整轮抓取。
+
 ```mermaid
 flowchart TB
   subgraph docker["Docker 容器"]
-    capture["Playwright (每 10 小时)<br/>打开 kankanews 回看页面<br/>浏览器 JS 自动完成 API 签名 + RSA 解密<br/>截获 m3u8 URL (JWT 绑定容器出口 IP)"]
+    capture["Playwright (按有效期刷新)<br/>频道详情 → 节目列表 → 节目详情<br/>浏览器发送签名请求，Node.js RSA 解码<br/>验证 m3u8 后保存独立频道缓存"]
     proxy["Node.js 代理<br/>/wx.m3u 返回全部频道 M3U 播放列表<br/>/?id=X 返回单频道 m3u8 (带 Referer)<br/>/seg?u=.. 流式代理 .ts 分片 (带缓存)"]
   end
 
   capture --> proxy
-  proxy --> ip["出口 IP = JWT user_ip ✅"]
+  proxy --> ip["出口 IP 和 User-Agent 与抓取一致"]
   ip --> cdn["CDN (volc/ws/tencent)<br/>IP 校验通过 ✅"]
 ```
 
@@ -121,6 +131,9 @@ docker compose logs -f
 
 # 手动刷新 m3u8
 docker compose exec kk-proxy node src/vps-capture.js
+
+# 手动刷新指定频道
+docker compose exec -e CHANNEL_ID=4 kk-proxy node src/vps-capture.js
 
 # 重启
 docker compose restart
