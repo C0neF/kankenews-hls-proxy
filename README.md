@@ -1,6 +1,6 @@
 # kankanews-hls-proxy
 
-将看看新闻(kankanews)的 HLS 直播/回看流代理出来,供 PotPlayer、VLC、hls.js 等播放器使用。
+将看看新闻(五星体育)的 HLS 直播/回看流代理出来,供 PotPlayer、VLC、hls.js 等播放器使用。
 
 ## 快速开始
 
