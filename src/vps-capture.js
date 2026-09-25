@@ -3,9 +3,12 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { signRequest } = require('./signing');
-const { getCacheFile, getDefaultChannelId } = require('./cache-store');
+const { getCacheFile, getDefaultChannelId, readCache } = require('./cache-store');
 const { USER_AGENT, COMMON_HEADERS } = require('./http-headers');
 const { resolveStreamSource } = require('./stream-source');
+const { createApiQueue } = require('./api-queue');
+
+const scheduleApi = createApiQueue();
 
 async function validateStream(url) {
   const response = await fetch(url, {
@@ -24,6 +27,7 @@ async function capture(options = {}) {
   const channelId = String(options.channelId || getDefaultChannelId());
   const cacheFile = options.cacheFile || getCacheFile(channelId);
   const log = message => console.log(`  [${channelId}] ${message}`);
+  const previousCache = options.previousCache ?? await readCache(channelId, { dataDir: path.dirname(cacheFile) });
   let browser;
   let temporaryFile;
   console.log(`[${new Date().toISOString()}] Starting capture for channel ${channelId}...`);
@@ -39,16 +43,18 @@ async function capture(options = {}) {
     });
 
     // Keep API requests in the browser; stream tokens bind both the IP and User-Agent.
-    const apiGet = (endpoint, params) => page.evaluate(async ({ endpoint, params, headers }) => {
+    const apiGet = (endpoint, params) => scheduleApi(() => page.evaluate(async ({ endpoint, params, headers }) => {
       const response = await fetch(`https://kapi.kankanews.com${endpoint}?${new URLSearchParams(params)}`, {
         headers: { ...headers, Accept: 'application/json', 'M-Uuid': localStorage.getItem('uuid') || '' },
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(12000),
       });
       if (!response.ok) throw new Error(`API HTTP ${response.status}`);
       return response.json();
-    }, { endpoint, params, headers: signRequest(params) });
+    }, { endpoint, params, headers: signRequest(params) }));
 
-    const stream = await resolveStreamSource({ channelId, apiGet, validateStream, log });
+    const stream = await resolveStreamSource({
+      channelId, apiGet, validateStream, log, previousCache, sourceState: options.sourceState,
+    });
     if (!stream) {
       log('No playable source found; keeping the previous cache.');
       return null;

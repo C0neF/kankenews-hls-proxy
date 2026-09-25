@@ -19,6 +19,7 @@ const crypto = require('node:crypto');
 const { pipeline } = require('node:stream/promises');
 const { getDataDir, getDefaultChannelId, readCache: readCacheFile } = require('./cache-store');
 const { COMMON_HEADERS } = require('./http-headers');
+const { isStreamUsable, streamExpiresAt } = require('./stream-lifetime');
 const { isPlaylistUrl, isPlaylistContentType, rewritePlaylist } = require('./hls-playlist');
 const {
   buildSegmentResponseHeaders,
@@ -270,6 +271,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/status') {
       const cache = await readCache(channelId);
       const now = Math.floor(Date.now() / 1000);
+      const expiry = streamExpiresAt(cache);
       let segCount = 0, cacheSize = 0;
       try {
         for (const name of await fsp.readdir(SEG_CACHE_DIR)) {
@@ -282,8 +284,10 @@ const server = http.createServer(async (req, res) => {
       const result = JSON.stringify({
         channelId,
         hasUrl: !!cache?.url,
+        usable: isStreamUsable(cache),
         exp: cache?.exp,
-        secondsLeft: cache?.exp ? cache.exp - now : null,
+        effectiveExp: expiry == null ? null : expiry / 1000,
+        secondsLeft: expiry == null ? null : Math.floor(expiry / 1000) - now,
         streamName: cache?.streamName,
         capturedAt: cache?.capturedAt ? new Date(cache.capturedAt * 1000).toISOString() : null,
         cachedSegments: segCount,
@@ -300,6 +304,7 @@ const server = http.createServer(async (req, res) => {
       const result = JSON.stringify({
         channelId,
         hasUrl: !!cache?.url,
+        usable: isStreamUsable(cache),
         m3u8: EXPOSE_RAW_URL ? cache?.url || null : null,
         exp: cache?.exp || null,
         streamName: cache?.streamName || null,
@@ -320,7 +325,7 @@ const server = http.createServer(async (req, res) => {
       let playlist = '#EXTM3U\n';
       for (const ch of CHANNELS) {
         const cache = await readCache(ch.id);
-        const avail = cache?.url ? '' : ' [未捕获]';
+        const avail = !cache?.url ? ' [未捕获]' : isStreamUsable(cache) ? '' : ' [待刷新]';
         playlist += `#EXTINF:-1 group-title="看看新闻",${ch.name}${avail}\n`;
         playlist += `${origin}/?id=${ch.id}\n`;
       }
@@ -339,8 +344,7 @@ const server = http.createServer(async (req, res) => {
         return res.end(`No m3u8 URL for channel ${channelId}. Run capture first.`);
       }
 
-      const now = Math.floor(Date.now() / 1000);
-      if (cache.exp && now > cache.exp - 60) {
+      if (!isStreamUsable(cache)) {
         res.writeHead(503, { 'Content-Type': 'text/plain' });
         return res.end('m3u8 URL expired. Waiting for next capture.');
       }

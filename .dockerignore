@@ -12,3 +12,10 @@ deploy/
 *.bat
 docker-compose*.yml
 node_modules/
+
+# Local reference userscripts
+te.js
+smg_fivestar.user.js
+
+# Local verification artifacts
+tmp/

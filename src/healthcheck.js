@@ -9,7 +9,7 @@ const req = http.get(`http://127.0.0.1:${port}/status`, (res) => {
   res.on('end', () => {
     try {
       const status = JSON.parse(body);
-      process.exit(res.statusCode === 200 && status.hasUrl ? 0 : 1);
+      process.exit(res.statusCode === 200 && status.hasUrl && status.usable ? 0 : 1);
     } catch {
       process.exit(1);
     }

@@ -3,6 +3,7 @@ node_modules/
 
 # Local reference userscript
 /te.js
+/smg_fivestar.user.js
 
 # Cache files
 /tmp/
