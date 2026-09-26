@@ -75,9 +75,10 @@ async function resolveStreamSource({
   }
   const deadline = now() + timeoutMs;
   let liveDeadline = Infinity;
+  let wafHit = false;
   const triedUrls = new Set();
   const triedPrograms = new Set();
-  const expired = () => now() >= Math.min(deadline, liveDeadline);
+  const expired = () => wafHit || now() >= Math.min(deadline, liveDeadline);
 
   function finish(stream) {
     if (!stream || !parseStreamAddress(stream.url, now())) return null;
@@ -96,6 +97,10 @@ async function resolveStreamSource({
       log(`${endpoint}: API code ${response?.code ?? 'unknown'}`);
     } catch (error) {
       log(`${endpoint}: ${error.message}`);
+      if (error && (error.isWaf || /upstream WAF block/.test(String(error.message || '')))) {
+        wafHit = true;
+        log('WAF cooldown: stop further API for this capture.');
+      }
     }
     return null;
   }

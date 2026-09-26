@@ -98,6 +98,8 @@ PotPlayer: `http://<NAS IP>:53535/wx.m3u` (频道列表)
 | `UPSTREAM_PROXY` | 空 | 可选 HTTP、HTTPS 或 SOCKS5 代理地址；API、HLS 清单和分片统一使用该出口，例如 `http://127.0.0.1:18092` |
 | `KK_RELAY_BASE` | `https://kk.conef1.ggff.net` | Cloudflare Worker 媒体中转。m3u8/分片走 `/p/hls/?u=`；空字符串则直连 CDN |
 | `KK_RELAY_API` | 空 (直连) | API 是否走 Worker `/p/api`。默认直连 `kapi`（Worker 出口可能被 WAF 403）；`1` 启用中转 |
+| `BROWSER_CDP_URL` | 空 | 外接浏览器 CDP，如 `ws://127.0.0.1:9222`（Obscura） |
+| `OBSCURA` | 空 | 设为 `1` 时默认连 `ws://127.0.0.1:9222` |
 
 ## 工作原理
 

@@ -9,10 +9,16 @@ function describeError(error) {
   return code && !message.includes(code) ? `${message} (${code})` : message;
 }
 
+function isWafText(text) {
+  return /WAF拦截页面|waf-attack-feedback/i.test(String(text || ''));
+}
+
 function parseApiResponse(status, text) {
   if (status < 200 || status >= 300) {
-    const reason = status === 403 && /WAF拦截页面|waf-attack-feedback/i.test(text) ? ' (upstream WAF block)' : '';
-    throw new Error(`API HTTP ${status}${reason}`);
+    const waf = status === 403 && isWafText(text);
+    const error = new Error(`API HTTP ${status}${waf ? ' (upstream WAF block)' : ''}`);
+    if (waf) error.isWaf = true;
+    throw error;
   }
   try {
     return JSON.parse(text);
@@ -24,11 +30,19 @@ function parseApiResponse(status, text) {
 function createBrowserApi({ page, requestContext, log = () => {}, pageAvailable = true, baseUrl }) {
   let activeUrl;
   let networkFailure;
+  let wafUntil = 0;
   page.on('requestfailed', request => {
     if (request.url() === activeUrl) networkFailure = request.failure()?.errorText;
   });
 
+  const noteWaf = () => { wafUntil = Date.now() + 45000; };
+
   return async (endpoint, params, signedHeaders) => {
+    if (Date.now() < wafUntil) {
+      const error = new Error('API skipped during WAF cooldown (upstream WAF block)');
+      error.isWaf = true;
+      throw error;
+    }
     let url;
     if (/^[a-z][a-z0-9+.-]*:/i.test(endpoint)) {
       url = new URL(endpoint);
@@ -61,6 +75,7 @@ function createBrowserApi({ page, requestContext, log = () => {}, pageAvailable 
         }, { url: url.href, headers });
         return parseApiResponse(response.status, response.text);
       } catch (error) {
+        if (error && error.isWaf) noteWaf();
         pageError = `${networkFailure ? `${networkFailure}: ` : ''}${describeError(error)}`;
         log(`Page API request failed (${pageError}); trying direct HTTP request.`);
       } finally {
@@ -86,11 +101,14 @@ function createBrowserApi({ page, requestContext, log = () => {}, pageAvailable 
       });
       return parseApiResponse(response.status(), await response.text());
     } catch (error) {
-      throw new Error(`API request failed (page: ${pageError}; direct: ${describeError(error)})`);
+      if (error && (error.isWaf || isWafText(error.message))) noteWaf();
+      const wrapped = new Error(`API request failed (page: ${pageError}; direct: ${describeError(error)})`);
+      if (error && error.isWaf) wrapped.isWaf = true;
+      throw wrapped;
     } finally {
       if (response) await response.dispose().catch(() => {});
     }
   };
 }
 
-module.exports = { createBrowserApi, describeError };
+module.exports = { createBrowserApi, describeError, isWafText };

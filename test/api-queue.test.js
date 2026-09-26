@@ -1,8 +1,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { createApiQueue } = require('../src/api-queue');
+const { createApiQueue, API_MIN_INTERVAL_MS } = require('../src/api-queue');
 
-test('API calls are serialized, spaced by 800 ms and continue after a rejected request', async () => {
+test('API calls are serialized, spaced by the configured interval and continue after a rejected request', async () => {
   let time = 0;
   const events = [];
   const queue = createApiQueue({ now: () => time, wait: async ms => { time += ms; } });
@@ -13,7 +13,11 @@ test('API calls are serialized, spaced by 800 ms and continue after a rejected r
     if (id === 1) throw new Error('request failed');
     return id;
   })));
-  assert.deepEqual(events, [{ id: 0, at: 0 }, { id: 1, at: 800 }, { id: 2, at: 1600 }]);
+  assert.deepEqual(events, [
+    { id: 0, at: 0 },
+    { id: 1, at: API_MIN_INTERVAL_MS },
+    { id: 2, at: API_MIN_INTERVAL_MS * 2 },
+  ]);
   assert.deepEqual(results.map(result => result.status), ['fulfilled', 'rejected', 'fulfilled']);
 });
 
