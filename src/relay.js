@@ -2,7 +2,7 @@
  * relay.js - 统一走 Cloudflare Worker 中转，降低源站按出口 IP 拒绝的概率。
  *
  * 环境变量 KK_RELAY_BASE:
- *   - 默认 http://kk.conef1.ggff.net
+ *   - 默认 https://kk.conef1.ggff.net
  *   - 设为空字符串则直连上游 (kapi / CDN)
  *
  * Worker 路由:
@@ -10,7 +10,7 @@
  *   /p/hls/?u=<urlencoded> → m3u8/ts 代拉, m3u8 内地址改写回 Worker
  */
 
-const DEFAULT_RELAY_BASE = 'http://kk.conef1.ggff.net';
+const DEFAULT_RELAY_BASE = 'https://kk.conef1.ggff.net';
 const DIRECT_API_BASE = 'https://kapi.kankanews.com';
 
 function normalizeBase(value) {
