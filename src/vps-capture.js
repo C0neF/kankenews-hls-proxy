@@ -7,20 +7,15 @@ const { getCacheFile, getDefaultChannelId, readCache } = require('./cache-store'
 const { USER_AGENT, COMMON_HEADERS } = require('./http-headers');
 const { resolveStreamSource } = require('./stream-source');
 const { createApiQueue } = require('./api-queue');
+const { createBrowserApi, describeError } = require('./browser-api');
+const { browserProxy, requestBuffer } = require('./upstream-request');
+const { toUpstreamMediaUrl } = require('./relay');
 
 const scheduleApi = createApiQueue();
 
 async function validateStream(url) {
-  const response = await fetch(url, {
-    headers: COMMON_HEADERS,
-    redirect: 'manual',
-    signal: AbortSignal.timeout(10000),
-  });
-  if (response.status !== 200) {
-    await response.body?.cancel();
-    return false;
-  }
-  return (await response.text()).trimStart().startsWith('#EXTM3U');
+  const response = await requestBuffer(toUpstreamMediaUrl(url), COMMON_HEADERS, 10000);
+  return response.status === 200 && response.body.toString().trimStart().startsWith('#EXTM3U');
 }
 
 async function capture(options = {}) {
@@ -36,21 +31,21 @@ async function capture(options = {}) {
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
-    const context = await browser.newContext({ userAgent: USER_AGENT, locale: 'zh-CN' });
+    const context = await browser.newContext({ userAgent: USER_AGENT, locale: 'zh-CN', proxy: browserProxy });
     const page = await context.newPage();
-    await page.goto(`https://live.kankanews.com/huikan?id=${encodeURIComponent(channelId)}`, {
-      waitUntil: 'domcontentloaded', timeout: 30000,
-    });
-
-    // Keep API requests in the browser; stream tokens bind both the IP and User-Agent.
-    const apiGet = (endpoint, params) => scheduleApi(() => page.evaluate(async ({ endpoint, params, headers }) => {
-      const response = await fetch(`https://kapi.kankanews.com${endpoint}?${new URLSearchParams(params)}`, {
-        headers: { ...headers, Accept: 'application/json', 'M-Uuid': localStorage.getItem('uuid') || '' },
-        signal: AbortSignal.timeout(12000),
+    let pageAvailable = true;
+    try {
+      const response = await page.goto(`https://live.kankanews.com/huikan?id=${encodeURIComponent(channelId)}`, {
+        waitUntil: 'domcontentloaded', timeout: 30000,
       });
-      if (!response.ok) throw new Error(`API HTTP ${response.status}`);
-      return response.json();
-    }, { endpoint, params, headers: signRequest(params) }));
+      if (!response?.ok()) throw new Error(`Live page HTTP ${response?.status() ?? 'unknown'}`);
+    } catch (error) {
+      pageAvailable = false;
+      log(`Live page unavailable (${describeError(error)}); using direct API requests.`);
+    }
+
+    const requestApi = createBrowserApi({ page, requestContext: context.request, pageAvailable, log });
+    const apiGet = (endpoint, params) => scheduleApi(() => requestApi(endpoint, params, signRequest(params)));
 
     const stream = await resolveStreamSource({
       channelId, apiGet, validateStream, log, previousCache, sourceState: options.sourceState,

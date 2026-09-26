@@ -185,7 +185,7 @@ function parseJwt(token) {
 
 // ===== KAPI 调用 =====
 const https = require('node:https');
-const KAPI_BASE = 'https://kapi.kankanews.com';
+const { toApiUrl } = require('./relay');
 
 /**
  * 调用 kankanews API
@@ -200,7 +200,7 @@ const KAPI_BASE = 'https://kapi.kankanews.com';
  */
 function kapiGet(path, params = {}) {
   const headers = signRequest(params);
-  const url = new URL(KAPI_BASE + path);
+  const url = new URL(toApiUrl(path));
   for (const [k, v] of Object.entries(params)) {
     url.searchParams.set(k, v);
   }

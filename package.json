@@ -10,5 +10,8 @@
   },
   "devDependencies": {
     "playwright": "1.61.0"
+  },
+  "dependencies": {
+    "proxy-agent": "8.0.2"
   }
 }

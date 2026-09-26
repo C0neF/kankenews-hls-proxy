@@ -95,6 +95,8 @@ PotPlayer: `http://<NAS IP>:53535/wx.m3u` (频道列表)
 | `MAX_CACHE_SIZE` | `1073741824` | 最大分片缓存 (字节, 默认 1GB) |
 | `MAX_CACHE_AGE` | `1800` | 缓存过期时间 (秒, 默认 30 分钟) |
 | `EXPOSE_RAW_URL` | `0` | 设为 `1` 时 `/url` 返回原始 m3u8 URL |
+| `UPSTREAM_PROXY` | 空 | 可选 HTTP、HTTPS 或 SOCKS5 代理地址；API、HLS 清单和分片统一使用该出口，例如 `http://127.0.0.1:18092` |
+| `KK_RELAY_BASE` | `http://kk.conef1.ggff.net` | Cloudflare Worker 中转入口。API 走 `/p/api`，m3u8/分片走 `/p/hls/?u=`；设为空字符串可恢复直连 `kapi`/CDN |
 
 ## 工作原理
 
@@ -103,6 +105,10 @@ PotPlayer: `http://<NAS IP>:53535/wx.m3u` (频道列表)
 直播和回看地址都会尝试，回看地址会移除 `start`、`end` 参数作为直播源使用。同一详情内优先尝试有明确到期时间、有效期更长的地址，同等条件下优先回看源。支持 `token` 及其他查询参数中的 JWT，以及 `volcTime`、`wsTime`、`expires` 等秒或毫秒时间戳，取最早的到期时间。地址必须尚有超过 5 秒的有效期且实际返回 HLS 清单才会写入缓存。浏览器抓取与分片代理使用相同的 User-Agent 和出口 IP。
 
 每轮抓取结束后等待 10 秒，再检查各频道缓存。刷新提前量按地址寿命的 15% 计算，限制在 15–120 秒；达到 `CAPTURE_INTERVAL` 也会刷新。无到期时间的地址按抓取后 20 分钟计算。失败保留旧缓存，至少间隔 60 秒重试；多频道串行抓取时，重试会等待当前频道完成。API 请求串行执行，两次请求开始时间至少间隔 800 毫秒。
+
+页面 API 请求出现 `Failed to fetch`、HTTP 错误或非 JSON 响应时，会参考脚本的 `GM_xmlhttpRequest` 机制，改用 Playwright HTTP 客户端兜底，保留签名、浏览器 Cookie、`M-Uuid` 和相同 User-Agent。该路径不受页面 CORS/CSP 限制，回看网页无法加载时也会尝试直接请求 API。页面请求超时为 12 秒，直接请求超时为 15 秒；两条路径都失败时，日志会保留各自的网络错误或 HTTP 状态，便于排查 OpenWrt 容器的连接问题。
+
+如果上游直接返回 WAF 403，切换请求方式可能仍被拒绝。可通过 `UPSTREAM_PROXY` 指定可用线路，浏览器、API 兜底、HLS 验证和实际分片下载会统一使用该代理，保持播放令牌绑定的出口 IP 一致。`host` 网络的容器可使用路由器上的 `127.0.0.1` 代理入口；`bridge` 网络需填写容器可访问的代理地址。HTTP 代理支持用户名和密码，SOCKS5 需使用无认证代理。
 
 `/status` 和 `/url` 的 `usable` 表示地址是否仍在有效期内，`/status` 的 `effectiveExp` 包含无到期时间地址的保守期限。健康检查使用同一判断。频道列表以“未捕获”标记缺少地址的频道，以“待刷新”标记已失效的地址。
 

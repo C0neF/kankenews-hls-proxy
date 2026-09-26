@@ -7,6 +7,8 @@
 | 模块 | 职责 |
 |---|---|
 | `src/vps-capture.js` | 启动浏览器、请求 API、验证 HLS 清单、原子写入频道缓存 |
+| `src/browser-api.js` | 页面请求及直接 HTTP 兜底，保留请求身份并报告网络错误 |
+| `src/upstream-request.js` | 统一上游代理配置，流式或缓冲读取 HTTP/HTTPS 响应 |
 | `src/signing.js` | 双 MD5 请求签名、RSA 地址解码、JWT payload 解析 |
 | `src/api-queue.js` | 串行请求队列及 800 毫秒最小请求间隔 |
 | `src/stream-source.js` | 选择直播/回看地址、复用取源节目、分轮扫描节目列表 |
@@ -29,6 +31,7 @@
 | 成功取源节目记忆 30 分钟 | 每频道独立保存节目 ID；进程重启时可从近期成功缓存恢复 |
 | 每轮扫描 2 个历史日期 | 失败后保留扫描位置，逐轮覆盖过去 7 天，北京时间跨日时重置 |
 | 至少 800 毫秒的串行 API 队列 | 请求排队后才生成时间戳和签名，失败不会阻塞后续任务 |
+| 页面 fetch 失败后改用 GM 请求 | 页面请求失败后使用同一 Playwright 上下文的 HTTP 客户端兜底 |
 | 按源寿命提前续期 | 提前量为寿命的 15%，限制在 15–120 秒 |
 
 参考脚本中的播放器组件、页面权限标记、全屏和视频播放进度处理属于浏览器 UI 行为。服务端通过 API 返回的可用节目与实际 HLS 响应取源，保留原有八频道支持，不修改节目权限字段。
@@ -47,7 +50,17 @@ API 基址为 `https://kapi.kankanews.com`。
 
 签名由业务参数、`platform=pc`、`version=2.42.23`、随机 `nonce`、秒级 `timestamp` 和 `Api-Version=v1` 组成。按参数名排序，忽略空值，拼接 `key=value&`，追加网页使用的固定签名密钥，然后计算两次 MD5。签名和参数通过请求头发送，业务参数同时放入查询字符串。
 
-抓取先打开 `https://live.kankanews.com/huikan?id=<频道>`，随后在页面上下文内调用 `fetch`，携带本地 `uuid` 对应的 `M-Uuid` 请求头。API 请求超时为 12 秒。浏览器与代理共用 `src/http-headers.js` 的 User-Agent，CDN 请求还携带页面的 Referer 和 Origin。应让浏览器请求与后续代理请求使用同一个出口 IP。
+抓取先尝试打开 `https://live.kankanews.com/huikan?id=<频道>`，随后在页面上下文内调用 `fetch`，携带本地 `uuid` 对应的 `M-Uuid` 请求头，超时为 12 秒。
+
+页面请求因网络错误、CORS/CSP 限制、HTTP 错误或非 JSON 响应失败时，改用 `BrowserContext.request.get()`。这条路径不受页面跨域策略限制，沿用原签名和 `M-Uuid`，共享浏览器上下文的 Cookie，并显式使用与代理相同的 User-Agent、Referer 和 Origin，超时为 15 秒。HTTP 重定向不会继续跟随，响应读取后释放缓存。有效 JSON 中的 API 业务错误码直接返回给取源逻辑，不触发额外传输重试。
+
+回看页面本身返回错误状态或加载失败时，仍会尝试直接 API 请求。页面与直接请求均失败时，错误信息保留浏览器网络错误码、直接请求的 DNS/TLS 错误或 HTTP 状态，省略堆栈、请求头和响应正文。
+
+浏览器与代理共用 `src/http-headers.js` 的 User-Agent。应让 API 请求与后续代理请求使用同一个出口 IP；直接请求也需要容器能够访问上游 API。
+
+设置 `UPSTREAM_PROXY` 后，Playwright 的浏览器上下文和 HTTP 客户端都使用该代理。HLS 验证、清单和分片代理通过共享的 Node.js 请求模块使用相同地址，避免只有 API 走代理而视频直连导致令牌的 IP 校验失败。代理支持 HTTP、HTTPS 和无认证 SOCKS5，未配置时直接连接。HTTP 代理凭据会转换为 Playwright 的认证字段，并交由 Node.js 代理 Agent 用于代理认证；不会写入频道缓存或状态接口。
+
+代理 Agent 使用 `proxy-agent`，通过动态导入兼容项目的 CommonJS 模块。HTTPS 连接保留目标主机名及证书校验，下载不自动跟随重定向。清单请求有 30 秒期限，捕获时的清单验证为 10 秒；分片继续使用流式传输和 Range 响应。
 
 API 的地址字段可能是明文 HTTPS 地址，也可能是 Base64 编码的 RSA 数据。加密数据按 128 字节分块，对每块执行公钥模幂运算 `c^e mod n`，验证 PKCS#1 Type 1 填充后拼接 URL。解码在 Node.js 内完成，不依赖页面上的 JSEncrypt，也不依赖播放器触发网络请求。
 
@@ -109,8 +122,9 @@ flowchart TD
 
 ```bash
 npm ci
+npx playwright install --with-deps chromium
 npm test
 bash -n docker-entrypoint.sh
 ```
 
-测试覆盖多种有效期格式、短期和未知期限源、节目记忆与分轮扫描、频道隔离、API 排队、失败重试，以及真实本地 HTTP 代理的状态、播放过期判断和健康检查。测试使用合成地址与本地服务，不需要参考脚本、浏览器安装或真实上游访问。
+测试覆盖多种有效期格式、短期和未知期限源、节目记忆与分轮扫描、频道隔离、API 排队、失败重试，以及真实本地 HTTP 代理的状态、播放过期判断和健康检查。浏览器集成测试使用真实 Chromium 和本地 HTTP 站点，模拟 CORS 预检失败，验证请求能够转入 HTTP 兜底并保留签名、Cookie、UUID 和 User-Agent。代理测试覆盖浏览器、API 兜底和 HLS 下载共用同一代理、HTTPS CONNECT、Range 响应及超时。测试不需要参考脚本或真实上游访问；GitHub Actions 会在测试前安装 Chromium 及其依赖。

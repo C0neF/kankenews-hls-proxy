@@ -43,6 +43,7 @@ jobs:
       - name: Test capture and proxy behavior
         run: |
           npm ci
+          npx playwright install --with-deps chromium
           npm test
           bash -n docker-entrypoint.sh
 

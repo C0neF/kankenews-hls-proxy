@@ -11,7 +11,6 @@
  */
 
 const http = require('node:http');
-const https = require('node:https');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
@@ -19,6 +18,7 @@ const crypto = require('node:crypto');
 const { pipeline } = require('node:stream/promises');
 const { getDataDir, getDefaultChannelId, readCache: readCacheFile } = require('./cache-store');
 const { COMMON_HEADERS } = require('./http-headers');
+const { requestStream: httpsStream, requestBuffer: httpsBuffer } = require('./upstream-request');
 const { isStreamUsable, streamExpiresAt } = require('./stream-lifetime');
 const { isPlaylistUrl, isPlaylistContentType, rewritePlaylist } = require('./hls-playlist');
 const {
@@ -27,6 +27,7 @@ const {
   isAllowedSegmentUrl,
   shouldCacheSegment,
 } = require('./segment-policy');
+const { toUpstreamMediaUrl } = require('./relay');
 
 // ===== 配置 =====
 const PORT = process.env.PORT || 53535;
@@ -97,40 +98,9 @@ async function readCache(channelId = DEFAULT_CHANNEL_ID) {
   return readCacheFile(channelId, { dataDir: DATA_DIR, defaultChannelId: DEFAULT_CHANNEL_ID });
 }
 
-// ===== 流式 HTTPS 请求 =====
-function httpsStream(url, headers) {
-  return new Promise((resolve, reject) => {
-    const u = new URL(url);
-    const req = https.get(
-      { hostname: u.hostname, path: u.pathname + u.search, headers },
-      (res) => resolve(res)
-    );
-    req.on('error', reject);
-    req.setTimeout(30000, () => { req.destroy(new Error('timeout')); });
-  });
-}
-
-function httpsBuffer(url, headers) {
-  return new Promise((resolve, reject) => {
-    const u = new URL(url);
-    const request = https.get(
-      { hostname: u.hostname, path: u.pathname + u.search, headers },
-      (res) => {
-        const chunks = [];
-        res.on('error', reject);
-        res.on('data', (d) => chunks.push(d));
-        res.on('end', () =>
-          resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) })
-        );
-      }
-    ).on('error', reject);
-    request.setTimeout(30000, () => request.destroy(new Error('timeout')));
-  });
-}
-
 // ===== m3u8 代理 (清单很小,全缓冲) =====
 async function handleM3u8(req, res, cache, origin) {
-  const resp = await httpsBuffer(cache.url, COMMON_HEADERS);
+  const resp = await httpsBuffer(toUpstreamMediaUrl(cache.url), COMMON_HEADERS);
 
   if (resp.status !== 200) {
     res.writeHead(resp.status, { 'Content-Type': 'text/plain' });
@@ -194,7 +164,7 @@ async function handleSegment(req, res, targetUrl, signature) {
 
   let upstream;
   try {
-    upstream = await httpsStream(targetUrl, headers);
+    upstream = await httpsStream(toUpstreamMediaUrl(targetUrl), headers);
   } catch (e) {
     res.writeHead(502, { 'Content-Type': 'text/plain' });
     return res.end(`upstream error: ${e.message}`);

@@ -4,6 +4,7 @@ node_modules/
 # Local reference userscript
 /te.js
 /smg_fivestar.user.js
+/dui.md
 
 # Cache files
 /tmp/
@@ -23,3 +24,6 @@ Thumbs.db
 
 # Secrets (don't commit real tokens)
 # m3u8-cache.json
+
+# Cloudflare Worker source (deploy separately; do not commit)
+/workers.js

@@ -18,7 +18,8 @@ function getAllowedSegmentHosts(value = process.env.ALLOWED_SEGMENT_HOSTS) {
 function isAllowedSegmentUrl(rawUrl, allowedHosts = getAllowedSegmentHosts()) {
   try {
     const url = new URL(rawUrl);
-    return url.protocol === 'https:' && allowedHosts.includes(url.hostname.toLowerCase());
+    return url.protocol === 'https:' && !url.port && !url.username && !url.password &&
+      allowedHosts.includes(url.hostname.toLowerCase());
   } catch {
     return false;
   }
