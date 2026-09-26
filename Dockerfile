@@ -1,48 +1,43 @@
 FROM node:20-slim
 
-# Install Playwright dependencies
-RUN apt-get update && apt-get install -y \
-    wget \
-    ca-certificates \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libcups2 \
-    libdbus-1-3 \
-    libdrm2 \
-    libgbm1 \
-    libgtk-3-0 \
-    libnspr4 \
-    libnss3 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    xdg-utils \
-    && rm -rf /var/lib/apt/lists/*
+# Obscura replaces Chromium (stealth headless browser, CDP on 9222)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        tar \
+        fonts-liberation \
+    && rm -rf /var/lib/apt/lists/* \
+    && arch="$(uname -m)" \
+    && case "$arch" in \
+         x86_64) OBSCURA_ARCH=x86_64 ;; \
+         aarch64|arm64) OBSCURA_ARCH=aarch64 ;; \
+         *) OBSCURA_ARCH=x86_64 ;; \
+       esac \
+    && curl -fsSL -o /tmp/obscura.tgz \
+         "https://github.com/h4ckf0r0day/obscura/releases/latest/download/obscura-${OBSCURA_ARCH}-linux.tar.gz" \
+    && tar xzf /tmp/obscura.tgz -C /usr/local/bin \
+    && chmod +x /usr/local/bin/obscura /usr/local/bin/obscura-worker \
+    && rm -f /tmp/obscura.tgz
 
 WORKDIR /app
 
-# Install dependencies
 COPY package.json package-lock.json ./
-RUN npm ci && npx playwright install chromium && npx playwright install-deps chromium
+# playwright-core is a CDP client only — no Chromium download
+RUN npm ci --omit=dev || npm install --omit=dev
 
-# Copy source
 COPY src/ ./src/
-
-# Create cache directory
 RUN mkdir -p /app/seg-cache /app/data
 
-# Environment
 ENV PORT=53535
 ENV CACHE_FILE=/app/data/m3u8-cache.json
 ENV SEG_CACHE_DIR=/app/seg-cache
 ENV CHANNEL_ID=10
 ENV CAPTURE_INTERVAL=36000000
+ENV BROWSER_CDP_URL=ws://127.0.0.1:9222
+ENV OBSCURA_PORT=9222
 
 EXPOSE 53535
 
-# Start script
 COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
 

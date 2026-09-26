@@ -1,4 +1,4 @@
-const { chromium } = require('playwright');
+const { chromium } = require('playwright-core');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
@@ -8,7 +8,7 @@ const { USER_AGENT, COMMON_HEADERS } = require('./http-headers');
 const { resolveStreamSource } = require('./stream-source');
 const { createApiQueue } = require('./api-queue');
 const { createBrowserApi, describeError } = require('./browser-api');
-const { browserProxy, requestBuffer } = require('./upstream-request');
+const { requestBuffer } = require('./upstream-request');
 const { toUpstreamMediaUrl } = require('./relay');
 
 const scheduleApi = createApiQueue();
@@ -16,45 +16,41 @@ const scheduleApi = createApiQueue();
 function resolveCdpUrl() {
   const explicit = process.env.BROWSER_CDP_URL || process.env.OBSCURA_CDP_URL;
   if (explicit) return explicit.trim();
-  return "ws://127.0.0.1:9222";
+  return 'ws://127.0.0.1:9222';
 }
 
-function useChromium() {
-  const mode = String(process.env.BROWSER_MODE || process.env.BROWSER || "").toLowerCase();
-  return mode === "chromium" || mode === "chrome" || mode === "playwright";
+function cdpCandidates(raw) {
+  const base = String(raw || '').trim();
+  if (!base) return ['ws://127.0.0.1:9222'];
+  if (/^wss?:\/\//i.test(base)) return [...new Set([base, base.replace(/^ws/i, 'http')])];
+  if (/^https?:\/\//i.test(base)) return [...new Set([base, base.replace(/^http/i, 'ws')])];
+  return [`ws://${base}`, `http://${base}`];
 }
 
 async function openBrowser(log) {
-  if (useChromium()) {
-    log("Launching Chromium (BROWSER_MODE=chromium)");
-    const browser = await chromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
-    return { browser, external: false };
+  const raw = resolveCdpUrl();
+  let lastError = null;
+  for (const cdpUrl of cdpCandidates(raw)) {
+    log(`Connecting Obscura/CDP at ${cdpUrl}`);
+    try {
+      const browser = await chromium.connectOverCDP(cdpUrl);
+      return { browser, external: true };
+    } catch (error) {
+      lastError = error;
+    }
   }
-  const cdpUrl = resolveCdpUrl();
-  log(`Connecting Obscura/CDP at ${cdpUrl}`);
-  try {
-    const browser = await chromium.connectOverCDP(cdpUrl);
-    return { browser, external: true };
-  } catch (error) {
-    throw new Error(
-      `Obscura CDP connect failed (${describeError(error)}). ` +
-      `Start it with: obscura serve --port 9222 --stealth. ` +
-      `Or set BROWSER_MODE=chromium to use bundled Playwright Chromium.`
-    );
-  }
+  throw new Error(
+    `Obscura CDP connect failed (${describeError(lastError)}). ` +
+    `Start Obscura: obscura serve --port 9222 --stealth. ` +
+    `Default CDP ws://127.0.0.1:9222; override with BROWSER_CDP_URL.`
+  );
 }
 
-async function openContext(browser, external) {
+async function openContext(browser) {
   const options = { userAgent: USER_AGENT, locale: 'zh-CN' };
-  if (external) {
-    const existing = browser.contexts()[0];
-    if (existing) return existing;
-    return browser.newContext(options);
-  }
-  return browser.newContext({ ...options, proxy: browserProxy });
+  const existing = browser.contexts()[0];
+  if (existing) return existing;
+  return browser.newContext(options);
 }
 
 async function validateStream(url) {
@@ -68,14 +64,12 @@ async function capture(options = {}) {
   const log = message => console.log(`  [${channelId}] ${message}`);
   const previousCache = options.previousCache ?? await readCache(channelId, { dataDir: path.dirname(cacheFile) });
   let browser;
-  let browserExternal = false;
   let temporaryFile;
   console.log(`[${new Date().toISOString()}] Starting capture for channel ${channelId}...`);
   try {
     const opened = await openBrowser(log);
     browser = opened.browser;
-    browserExternal = opened.external;
-    const context = await openContext(browser, browserExternal);
+    const context = await openContext(browser);
     const page = await context.newPage();
     let pageAvailable = true;
     try {
@@ -111,7 +105,6 @@ async function capture(options = {}) {
     return null;
   } finally {
     if (temporaryFile) await fs.unlink(temporaryFile).catch(() => {});
-    // External CDP (Obscura) stays up; disconnect only.
     if (browser) await browser.close().catch(() => {});
   }
 }
@@ -120,4 +113,4 @@ if (require.main === module) {
   capture().then(result => { if (!result) process.exitCode = 1; });
 }
 
-module.exports = { capture, validateStream, resolveCdpUrl, openBrowser };
+module.exports = { capture, validateStream, resolveCdpUrl, openBrowser, cdpCandidates };
