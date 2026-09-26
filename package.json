@@ -1,17 +1,15 @@
 {
-  "name": "kankanews-hls-proxy",
+  "name": "kankenews-hls-proxy",
   "version": "1.0.0",
   "private": true,
-  "description": "kankanews HLS proxy for PotPlayer",
+  "description": "kankenews HLS proxy for PotPlayer",
   "scripts": {
     "start": "node src/vps-server.js",
     "capture": "node src/vps-capture.js",
     "test": "node --test"
   },
-  "devDependencies": {
-    "playwright-core": "^1.61.0"
-  },
   "dependencies": {
+    "playwright-core": "1.61.0",
     "proxy-agent": "8.0.2"
   }
 }
