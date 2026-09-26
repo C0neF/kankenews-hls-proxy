@@ -120,7 +120,7 @@ async function resolveStreamSource({
       if (triedUrls.has(stream.url) || expired()) continue;
       triedUrls.add(stream.url);
       try {
-        if (await validateStream(stream.url) && parseStreamAddress(stream.url, now())) {
+        if (await validateStream(stream.url, log) && parseStreamAddress(stream.url, now())) {
           return stream;
         }
         log(`${source} ${stream.sourceType}: playlist unavailable`);

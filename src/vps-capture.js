@@ -53,10 +53,37 @@ async function openContext(browser) {
   return browser.newContext(options);
 }
 
-async function validateStream(url) {
-  const response = await requestBuffer(toUpstreamMediaUrl(url), COMMON_HEADERS, 10000);
-  return response.status === 200 && response.body.toString().trimStart().startsWith('#EXTM3U');
+function isM3u8Body(buf) {
+  return buf.toString('utf8').trimStart().startsWith('#EXTM3U');
 }
+
+async function probePlaylist(url) {
+  try {
+    const response = await requestBuffer(url, COMMON_HEADERS, 10000);
+    const body = response.body;
+    return {
+      ok: response.status === 200 && isM3u8Body(body),
+      status: response.status,
+      preview: body.toString('utf8').slice(0, 80).replace(/\s+/g, ' '),
+    };
+  } catch (error) {
+    return { ok: false, status: 0, preview: String(error && error.message || error) };
+  }
+}
+
+async function validateStream(url, log = () => {}) {
+  const viaRelay = toUpstreamMediaUrl(url);
+  const relay = await probePlaylist(viaRelay);
+  if (relay.ok) return true;
+  const direct = await probePlaylist(url);
+  if (direct.ok) {
+    log('playlist ok via direct (relay ' + relay.status + ')');
+    return true;
+  }
+  log('playlist check failed relay=' + relay.status + ' ' + relay.preview + ' | direct=' + direct.status + ' ' + direct.preview);
+  return false;
+}
+
 
 async function capture(options = {}) {
   const channelId = String(options.channelId || getDefaultChannelId());
