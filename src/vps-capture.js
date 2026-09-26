@@ -71,19 +71,51 @@ async function probePlaylist(url) {
   }
 }
 
-async function validateStream(url, log = () => {}) {
-  const viaRelay = toUpstreamMediaUrl(url);
-  const relay = await probePlaylist(viaRelay);
-  if (relay.ok) return true;
-  const direct = await probePlaylist(url);
-  if (direct.ok) {
-    log('playlist ok via direct (relay ' + relay.status + ')');
-    return true;
-  }
-  log('playlist check failed relay=' + relay.status + ' ' + relay.preview + ' | direct=' + direct.status + ' ' + direct.preview);
-  return false;
+function makeValidateStream(page, acceptOnFail) {
+  return async function validateStream(url, log = () => {}) {
+
+    const viaRelay = toUpstreamMediaUrl(url);
+    const targets = [viaRelay, url];
+    let last = { status: 0, preview: "" };
+    for (const target of targets) {
+      if (!page) {
+        const r = await probePlaylist(target);
+        if (r.ok) return true;
+        last = r;
+        continue;
+      }
+      try {
+        const result = await page.evaluate(async (u) => {
+          try {
+            const res = await fetch(u, { redirect: "manual" });
+            const text = await res.text();
+            return { status: res.status, text: text.slice(0, 200000) };
+          } catch (e) {
+            return { status: 0, text: String(e && e.message || e) };
+          }
+        }, target);
+        const ok = result.status === 200 && String(result.text || "").trimStart().startsWith("#EXTM3U");
+        if (ok) {
+          log("playlist ok via page.fetch " + new URL(target).host);
+          return true;
+        }
+        last = { status: result.status, preview: String(result.text || "").slice(0, 60).replace(/\s+/g, " ") };
+      } catch (e) {
+        last = { status: 0, preview: String(e && e.message || e) };
+      }
+    }
+    if (acceptOnFail) {
+      log("playlist check failed " + last.status + " but accept (STRICT_PLAYLIST_CHECK!=1)");
+      return true;
+    }
+    log("playlist check failed " + last.status + " " + last.preview);
+    return false;
+  };
 }
 
+async function validateStream(url, log = () => {}) {
+  return makeValidateStream(null, false)(url, log);
+}
 
 async function capture(options = {}) {
   const channelId = String(options.channelId || getDefaultChannelId());
@@ -113,13 +145,21 @@ async function capture(options = {}) {
     const apiGet = (endpoint, params) => scheduleApi(() => requestApi(endpoint, params, signRequest(params)));
 
     const stream = await resolveStreamSource({
-      channelId, apiGet, validateStream, log, previousCache, sourceState: options.sourceState,
+      channelId, apiGet, validateStream: makeValidateStream(page, process.env.STRICT_PLAYLIST_CHECK !== "1"), log, previousCache, sourceState: options.sourceState,
     });
     if (!stream) {
       log('No playable source found; keeping the previous cache.');
       return null;
     }
-    const cache = { ...stream, capturedAt: Math.floor(Date.now() / 1000), channelId };
+    let playlistBody = null;
+    try {
+      playlistBody = await page.evaluate(async (u) => {
+        const res = await fetch(u, { redirect: "manual" });
+        const text = await res.text();
+        return res.status === 200 ? text : null;
+      }, stream.url);
+    } catch (e) {}
+    const cache = { ...stream, capturedAt: Math.floor(Date.now() / 1000), channelId, playlistBody };
     await fs.mkdir(path.dirname(cacheFile), { recursive: true });
     temporaryFile = `${cacheFile}.${randomUUID()}.tmp`;
     await fs.writeFile(temporaryFile, JSON.stringify(cache, null, 2));

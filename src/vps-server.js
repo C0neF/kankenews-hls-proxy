@@ -100,6 +100,9 @@ async function readCache(channelId = DEFAULT_CHANNEL_ID) {
 
 // ===== m3u8 代理 (清单很小,全缓冲) =====
 async function handleM3u8(req, res, cache, origin) {
+  if (cache.playlistBody && String(cache.playlistBody).trimStart().startsWith('#EXTM3U')) {
+    return sendPlaylist(res, cache.playlistBody, cache.url, origin, cache.signature);
+  }
   const resp = await httpsBuffer(toUpstreamMediaUrl(cache.url), COMMON_HEADERS);
 
   if (resp.status !== 200) {
