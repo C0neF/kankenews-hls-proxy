@@ -96,7 +96,8 @@ PotPlayer: `http://<NAS IP>:53535/wx.m3u` (频道列表)
 | `MAX_CACHE_AGE` | `1800` | 缓存过期时间 (秒, 默认 30 分钟) |
 | `EXPOSE_RAW_URL` | `0` | 设为 `1` 时 `/url` 返回原始 m3u8 URL |
 | `UPSTREAM_PROXY` | 空 | 可选 HTTP、HTTPS 或 SOCKS5 代理地址；API、HLS 清单和分片统一使用该出口，例如 `http://127.0.0.1:18092` |
-| `KK_RELAY_BASE` | `https://kk.conef1.ggff.net` | Cloudflare Worker 中转入口。API 走 `/p/api`，m3u8/分片走 `/p/hls/?u=`；设为空字符串可恢复直连 `kapi`/CDN |
+| `KK_RELAY_BASE` | `https://kk.conef1.ggff.net` | Cloudflare Worker 媒体中转。m3u8/分片走 `/p/hls/?u=`；空字符串则直连 CDN |
+| `KK_RELAY_API` | 空 (直连) | API 是否走 Worker `/p/api`。默认直连 `kapi`（Worker 出口可能被 WAF 403）；`1` 启用中转 |
 
 ## 工作原理
 

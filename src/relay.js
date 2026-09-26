@@ -1,13 +1,13 @@
 /**
- * relay.js - 统一走 Cloudflare Worker 中转，降低源站按出口 IP 拒绝的概率。
+ * relay.js - Cloudflare Worker 中转
  *
- * 环境变量 KK_RELAY_BASE:
- *   - 默认 https://kk.conef1.ggff.net
- *   - 设为空字符串则直连上游 (kapi / CDN)
- *
- * Worker 路由:
  *   /p/api/<path>          → https://kapi.kankanews.com/<path>
- *   /p/hls/?u=<urlencoded> → m3u8/ts 代拉, m3u8 内地址改写回 Worker
+ *   /p/hls/?u=<urlencoded> → m3u8/ts 代拉
+ *
+ * 环境变量:
+ *   KK_RELAY_BASE  媒体中转入口, 默认 https://kk.conef1.ggff.net; 空字符串则直连 CDN
+ *   KK_RELAY_API   API 是否走中转: 默认 off (直连 kapi, 避开 Worker 出口被 WAF)
+ *                  设为 1/on 使用 KK_RELAY_BASE, 或填完整中转地址
  */
 
 const DEFAULT_RELAY_BASE = 'https://kk.conef1.ggff.net';
@@ -23,10 +23,19 @@ function getRelayBase() {
   return normalizeBase(raw);
 }
 
+function getApiRelayBase() {
+  const raw = process.env.KK_RELAY_API;
+  if (raw === undefined) return '';
+  const v = String(raw).trim();
+  if (!v || v === '0' || v.toLowerCase() === 'off') return '';
+  if (v === '1' || v.toLowerCase() === 'on') return getRelayBase();
+  return normalizeBase(v);
+}
+
 function toApiUrl(path) {
   const p = String(path || '');
   const suffix = p.startsWith('/') ? p : `/${p}`;
-  const base = getRelayBase();
+  const base = getApiRelayBase();
   return base ? `${base}/p/api${suffix}` : `${DIRECT_API_BASE}${suffix}`;
 }
 
@@ -72,6 +81,7 @@ module.exports = {
   DEFAULT_RELAY_BASE,
   DIRECT_API_BASE,
   getRelayBase,
+  getApiRelayBase,
   isLocalHostname,
   toApiUrl,
   toUpstreamMediaUrl,
