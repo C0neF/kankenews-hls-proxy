@@ -8,10 +8,16 @@ const { USER_AGENT, COMMON_HEADERS } = require('./http-headers');
 const { resolveStreamSource } = require('./stream-source');
 const { createApiQueue } = require('./api-queue');
 const { createBrowserApi, describeError } = require('./browser-api');
+const { createSessionManager, DEFAULT_SESSION_IDLE_MS } = require('./capture-session');
 const { requestBuffer } = require('./upstream-request');
 const { toUpstreamMediaUrl } = require('./relay');
 
 const scheduleApi = createApiQueue();
+
+function positiveIntEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 function resolveCdpUrl() {
   const explicit = process.env.BROWSER_CDP_URL || process.env.OBSCURA_CDP_URL;
@@ -52,6 +58,43 @@ async function openContext(browser) {
   if (existing) return existing;
   return browser.newContext(options);
 }
+
+function sessionLog(message) {
+  console.log(`  [session] ${message}`);
+}
+
+// One connection and one navigated live page are shared by every channel
+// capture: reloading the page per channel multiplied both our API traffic and
+// the page's own requests, which is what trips the upstream WAF.
+async function openSession() {
+  const opened = await openBrowser(sessionLog);
+  const context = await openContext(opened.browser);
+  const page = await context.newPage();
+  let pageAvailable = true;
+  try {
+    const response = await page.goto('https://live.kankanews.com/huikan', {
+      waitUntil: 'domcontentloaded', timeout: 30000,
+    });
+    if (!response?.ok()) throw new Error(`Live page HTTP ${response?.status() ?? 'unknown'}`);
+  } catch (error) {
+    pageAvailable = false;
+    sessionLog(`Live page unavailable (${describeError(error)}); using direct API requests.`);
+  }
+  return {
+    browser: opened.browser,
+    context,
+    page,
+    pageAvailable,
+    isHealthy: () => opened.browser.isConnected() && !page.isClosed(),
+    async close() {
+      await page.close().catch(() => {});
+      await opened.browser.close().catch(() => {});
+    },
+  };
+}
+
+const SESSION_IDLE_MS = positiveIntEnv('SESSION_IDLE_MS', DEFAULT_SESSION_IDLE_MS);
+const sessionManager = createSessionManager({ open: openSession, idleMs: SESSION_IDLE_MS, log: sessionLog });
 
 function isM3u8Body(buf) {
   return buf.toString('utf8').trimStart().startsWith('#EXTM3U');
@@ -122,26 +165,15 @@ async function capture(options = {}) {
   const cacheFile = options.cacheFile || getCacheFile(channelId);
   const log = message => console.log(`  [${channelId}] ${message}`);
   const previousCache = options.previousCache ?? await readCache(channelId, { dataDir: path.dirname(cacheFile) });
-  let browser;
   let temporaryFile;
+  let session;
+  let discardSession = false;
   console.log(`[${new Date().toISOString()}] Starting capture for channel ${channelId}...`);
   try {
-    const opened = await openBrowser(log);
-    browser = opened.browser;
-    const context = await openContext(browser);
-    const page = await context.newPage();
-    let pageAvailable = true;
-    try {
-      const response = await page.goto(`https://live.kankanews.com/huikan?id=${encodeURIComponent(channelId)}`, {
-        waitUntil: 'domcontentloaded', timeout: 30000,
-      });
-      if (!response?.ok()) throw new Error(`Live page HTTP ${response?.status() ?? 'unknown'}`);
-    } catch (error) {
-      pageAvailable = false;
-      log(`Live page unavailable (${describeError(error)}); using direct API requests.`);
-    }
+    session = await sessionManager.acquire();
+    const page = session.page;
 
-    const requestApi = createBrowserApi({ page, requestContext: context.request, pageAvailable, log });
+    const requestApi = createBrowserApi({ page, requestContext: session.context.request, pageAvailable: session.pageAvailable, log });
     const apiGet = (endpoint, params) => scheduleApi(() => requestApi(endpoint, params, signRequest(params)));
 
     const stream = await resolveStreamSource({
@@ -169,10 +201,16 @@ async function capture(options = {}) {
     return cache;
   } catch (error) {
     log(`Capture failed: ${error.message}`);
+    // The session itself may be the failure (dead CDP connection or page);
+    // drop it so the next capture reconnects instead of reusing the wreckage.
+    discardSession = true;
     return null;
   } finally {
+    if (session) {
+      if (discardSession) await sessionManager.discard(session).catch(() => {});
+      else sessionManager.release(session);
+    }
     if (temporaryFile) await fs.unlink(temporaryFile).catch(() => {});
-    if (browser) await browser.close().catch(() => {});
   }
 }
 
@@ -180,4 +218,4 @@ if (require.main === module) {
   capture().then(result => { if (!result) process.exitCode = 1; });
 }
 
-module.exports = { capture, validateStream, resolveCdpUrl, openBrowser, cdpCandidates };
+module.exports = { capture, validateStream, resolveCdpUrl, openBrowser, cdpCandidates, openSession, sessionManager };

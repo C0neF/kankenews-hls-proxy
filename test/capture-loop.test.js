@@ -3,7 +3,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { needsCapture, captureDueChannels } = require('../src/capture-loop');
+const { needsCapture, captureDueChannels, wafBackoffDelay, WAF_BACKOFF_STEPS_MS } = require('../src/capture-loop');
 const { getCacheFile } = require('../src/cache-store');
 
 const NOW = Date.parse('2026-09-07T12:00:00Z');
@@ -61,4 +61,63 @@ test('failed channels retry after a minute while valid channels are skipped', as
   assert.deepEqual(attempts, ['10', '11', '10', '11']);
   assert.notEqual(states.get('10'), states.get('11'));
   assert.deepEqual(JSON.parse(await fs.readFile(getCacheFile('10', dataDir), 'utf8')), old);
+});
+
+test('WAF failures escalate the quiet period and gate every channel', async t => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kk-waf-backoff-'));
+  t.after(async () => { await fs.rmdir(dataDir); });
+
+  let time = NOW;
+  const wafState = { strikes: 0, until: 0 };
+  const attempts = [];
+  const options = {
+    channelIds: ['1', '2'], dataDir, now: () => time, nextAttempts: new Map(),
+    sourceStates: new Map(), wafState,
+    captureFn: async ({ channelId, sourceState }) => {
+      attempts.push(channelId);
+      if (channelId === '1') {
+        sourceState.wafHitAt = time + 1;
+        return null;
+      }
+      return null;
+    },
+  };
+
+  await captureDueChannels(options);
+  // The first WAF hit protects every later channel in the same round.
+  assert.deepEqual(attempts, ['1']);
+  assert.equal(wafState.strikes, 1);
+  assert.equal(wafState.until, NOW + 300000);
+  assert.equal(options.nextAttempts.get('1'), NOW + 300000);
+
+  // During the quiet period no channel is touched, not even the unaffected one.
+  time += 60000;
+  await captureDueChannels(options);
+  assert.deepEqual(attempts, ['1']);
+
+  // The gated probe escalates to the second step.
+  time = NOW + 300000;
+  await captureDueChannels(options);
+  assert.deepEqual(attempts, ['1', '1']);
+  assert.equal(wafState.strikes, 2);
+  assert.equal(wafState.until, time + 900000);
+
+  // A successful capture resets the strikes and reopens the gate.
+  options.captureFn = async ({ channelId }) => {
+    attempts.push(channelId);
+    return { url: 'https://example.test/fresh.m3u8', capturedAt: time / 1000 };
+  };
+  time = wafState.until;
+  await captureDueChannels(options);
+  assert.deepEqual(attempts, ['1', '1', '1', '2']);
+  assert.equal(wafState.strikes, 0);
+  assert.equal(wafState.until, 0);
+  assert.equal(options.nextAttempts.get('1'), time + 60000);
+  assert.equal(options.nextAttempts.get('2'), time + 60000);
+});
+
+test('WAF backoff delays escalate and cap at the last step', () => {
+  assert.deepEqual([1, 2, 3].map(strike => wafBackoffDelay(strike)), WAF_BACKOFF_STEPS_MS);
+  assert.equal(wafBackoffDelay(0), WAF_BACKOFF_STEPS_MS[0]);
+  assert.equal(wafBackoffDelay(99), WAF_BACKOFF_STEPS_MS.at(-1));
 });

@@ -1,9 +1,21 @@
 const { setTimeout: sleep } = require('node:timers/promises');
 
-const API_MIN_INTERVAL_MS = 1200;
+const DEFAULT_API_MIN_INTERVAL_MS = 1200;
 const WAF_COOLDOWN_MS = 45000;
 
-function createApiQueue({ now = Date.now, wait = sleep, intervalMs = API_MIN_INTERVAL_MS } = {}) {
+function positiveMs(value) {
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function envMs(name, fallback) {
+  return positiveMs(Number(process.env[name])) ?? fallback;
+}
+
+function createApiQueue({
+  now = Date.now, wait = sleep,
+  intervalMs = envMs('API_MIN_INTERVAL_MS', DEFAULT_API_MIN_INTERVAL_MS),
+  jitterMs = envMs('API_JITTER_MS', 0),
+} = {}) {
   let lastStartedAt = -Infinity;
   let queue = Promise.resolve();
   let wafUntil = 0;
@@ -13,7 +25,9 @@ function createApiQueue({ now = Date.now, wait = sleep, intervalMs = API_MIN_INT
       if (now() < wafUntil) {
         await wait(wafUntil - now());
       }
-      const delay = Math.max(0, intervalMs - (now() - lastStartedAt));
+      // Extra random spacing keeps a fixed request cadence from standing out.
+      const jitter = jitterMs > 0 ? Math.round(Math.random() * jitterMs) : 0;
+      const delay = Math.max(0, intervalMs + jitter - (now() - lastStartedAt));
       if (delay) await wait(delay);
       lastStartedAt = now();
       try {
@@ -35,4 +49,4 @@ function createApiQueue({ now = Date.now, wait = sleep, intervalMs = API_MIN_INT
   return schedule;
 }
 
-module.exports = { createApiQueue, API_MIN_INTERVAL_MS, WAF_COOLDOWN_MS };
+module.exports = { createApiQueue, API_MIN_INTERVAL_MS: DEFAULT_API_MIN_INTERVAL_MS, WAF_COOLDOWN_MS };

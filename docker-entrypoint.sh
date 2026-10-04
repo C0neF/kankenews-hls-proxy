@@ -8,6 +8,10 @@ export CACHE_FILE=${CACHE_FILE:-/app/data/m3u8-cache.json}
 export CAPTURE_INTERVAL=${CAPTURE_INTERVAL:-36000000}
 export OBSCURA_PORT=${OBSCURA_PORT:-9222}
 export BROWSER_CDP_URL=${BROWSER_CDP_URL:-ws://127.0.0.1:${OBSCURA_PORT}}
+# Single-IP friendliness: slower, jittered API pacing and one shared capture page.
+export API_MIN_INTERVAL_MS=${API_MIN_INTERVAL_MS:-3000}
+export API_JITTER_MS=${API_JITTER_MS:-400}
+export SESSION_IDLE_MS=${SESSION_IDLE_MS:-30000}
 
 cd /app
 echo "kankanews HLS Proxy: port ${PORT}; channels ${CHANNEL_IDS}"

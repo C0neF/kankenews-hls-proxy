@@ -20,6 +20,10 @@ services:
       - CHANNEL_IDS=${CHANNEL_IDS:-1,2,4,5,9,10,11,12}
       - PORT=53535
       - CAPTURE_INTERVAL=${CAPTURE_INTERVAL:-36000000}
+      # 单 IP 亲和:更慢且带抖动的 API 节奏、共享抓取页面
+      - API_MIN_INTERVAL_MS=${API_MIN_INTERVAL_MS:-3000}
+      - API_JITTER_MS=${API_JITTER_MS:-400}
+      - SESSION_IDLE_MS=${SESSION_IDLE_MS:-30000}
       - ALLOWED_SEGMENT_HOSTS=${ALLOWED_SEGMENT_HOSTS:-volc-stream.kksmg.com,ws-channels.kksmg.com,tencent-stream.kksmg.com}
       - EXPOSE_RAW_URL=${EXPOSE_RAW_URL:-0}
       - UPSTREAM_PROXY=${UPSTREAM_PROXY:-}

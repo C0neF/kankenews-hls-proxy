@@ -348,3 +348,20 @@ test('playlist validation uses the proxy User-Agent and rejects HTML, errors and
   assert.equal(await validateStream(`${base}/good`), true);
   for (const path of ['/html', '/error', '/redirect']) assert.equal(await validateStream(`${base}${path}`), false);
 });
+
+test('a WAF hit is recorded on the channel source state', async () => {
+  const sourceState = {};
+  let calls = 0;
+  const result = await resolveStreamSource({
+    channelId: '10', now: () => NOW,
+    apiGet: async () => {
+      calls += 1;
+      throw Object.assign(new Error('API HTTP 403 (upstream WAF block)'), { isWaf: true });
+    },
+    validateStream: async () => assert.fail('no playlist checks after a WAF block'),
+    sourceState,
+  });
+  assert.equal(result, null);
+  assert.equal(calls, 1);
+  assert.equal(sourceState.wafHitAt, NOW);
+});

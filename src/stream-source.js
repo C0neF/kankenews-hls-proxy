@@ -99,6 +99,8 @@ async function resolveStreamSource({
       log(`${endpoint}: ${error.message}`);
       if (error && (error.isWaf || /upstream WAF block/.test(String(error.message || '')))) {
         wafHit = true;
+        // Let the capture loop apply its escalating backoff for this channel.
+        sourceState.wafHitAt = now();
         log('WAF cooldown: stop further API for this capture.');
       }
     }

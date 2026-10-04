@@ -29,3 +29,32 @@ test('slow API calls already satisfy the interval without an extra delay', async
   await first;
   assert.equal(await second, 1200);
 });
+
+test('the interval can be raised through API_MIN_INTERVAL_MS', async () => {
+  process.env.API_MIN_INTERVAL_MS = '2500';
+  try {
+    let time = 0;
+    const events = [];
+    const queue = createApiQueue({ now: () => time, wait: async ms => { time += ms; } });
+    await queue(async () => { events.push(time); });
+    await queue(async () => { events.push(time); });
+    assert.deepEqual(events, [0, 2500]);
+  } finally {
+    delete process.env.API_MIN_INTERVAL_MS;
+  }
+});
+
+test('jitter only ever adds spacing on top of the interval', async () => {
+  const originalRandom = Math.random;
+  Math.random = () => 0.5;
+  try {
+    let time = 0;
+    const events = [];
+    const queue = createApiQueue({ now: () => time, wait: async ms => { time += ms; }, intervalMs: 1000, jitterMs: 400 });
+    await queue(async () => { events.push(time); });
+    await queue(async () => { events.push(time); });
+    assert.deepEqual(events, [0, 1200]);
+  } finally {
+    Math.random = originalRandom;
+  }
+});
