@@ -23,7 +23,8 @@ services:
       - ALLOWED_SEGMENT_HOSTS=${ALLOWED_SEGMENT_HOSTS:-volc-stream.kksmg.com,ws-channels.kksmg.com,tencent-stream.kksmg.com}
       - EXPOSE_RAW_URL=${EXPOSE_RAW_URL:-0}
       - UPSTREAM_PROXY=${UPSTREAM_PROXY:-}
-      - KK_RELAY_BASE=${KK_RELAY_BASE:-https://kk.conef1.ggff.net}
+      # 媒体中转, 默认停用直连 CDN; 需要时填入如 https://kk.conef.de5.net
+      - KK_RELAY_BASE=${KK_RELAY_BASE:-}
       - KK_RELAY_API=${KK_RELAY_API:-}
       - BROWSER_CDP_URL=${BROWSER_CDP_URL:-}
       - OBSCURA=${OBSCURA:-}

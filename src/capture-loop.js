@@ -5,9 +5,13 @@ const { streamExpiresAt, streamRenewalMargin } = require('./stream-lifetime');
 
 const DEFAULT_INTERVAL = 36000000;
 const RETRY_DELAY = 60000;
+// Playback-side 403 marks (cache.failedAt) bypass the regular expiry schedule this long.
+const FAILED_RETRY_WINDOW_MS = 10 * 60 * 1000;
 
 function needsCapture(cache, now = Date.now(), interval = DEFAULT_INTERVAL) {
   if (!cache?.url || !Number.isFinite(cache.capturedAt)) return true;
+  if (Number.isFinite(cache.failedAt) && cache.failedAt > 0 &&
+      now < cache.failedAt * 1000 + FAILED_RETRY_WINDOW_MS) return true;
   if (now >= cache.capturedAt * 1000 + interval) return true;
   const expiry = streamExpiresAt(cache);
   return expiry == null || now >= expiry - streamRenewalMargin(cache);

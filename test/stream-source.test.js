@@ -330,6 +330,10 @@ test('a validated live source bounds the extra search for unavailable replay sou
 });
 
 test('playlist validation uses the proxy User-Agent and rejects HTML, errors and redirects', async t => {
+  // Standalone validation runs without a browser page: fetch the upstream directly
+  // and apply the strict policy to assert real rejections.
+  process.env.KK_RELAY_BASE = '';
+  process.env.STRICT_PLAYLIST_CHECK = '1';
   const server = http.createServer((req, res) => {
     assert.equal(req.headers['user-agent'], USER_AGENT);
     assert.equal(req.headers.referer, 'https://live.kankanews.com/');

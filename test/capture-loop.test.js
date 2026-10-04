@@ -20,6 +20,8 @@ test('capture refreshes early for short-lived tokens and retains the configured 
   assert.equal(needsCapture(cache, NOW + 60000, 60000), true);
   assert.equal(needsCapture({ ...cache, exp: NOW / 1000 + 90 }, NOW + 74000), false);
   assert.equal(needsCapture({ ...cache, exp: NOW / 1000 + 90 }, NOW + 75000), true);
+  assert.equal(needsCapture({ ...cache, failedAt: NOW / 1000 - 60 }, NOW), true);
+  assert.equal(needsCapture({ ...cache, failedAt: NOW / 1000 - 601 }, NOW), false);
 });
 
 test('failed channels retry after a minute while valid channels are skipped', async t => {

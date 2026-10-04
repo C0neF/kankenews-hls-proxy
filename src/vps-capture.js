@@ -71,9 +71,9 @@ async function probePlaylist(url) {
   }
 }
 
-function makeValidateStream(page, acceptOnFail) {
+function makeValidateStream(page) {
   return async function validateStream(url, log = () => {}) {
-
+    const strict = process.env.STRICT_PLAYLIST_CHECK === "1";
     const viaRelay = toUpstreamMediaUrl(url);
     const targets = [viaRelay, url];
     let last = { status: 0, preview: "" };
@@ -104,7 +104,7 @@ function makeValidateStream(page, acceptOnFail) {
         last = { status: 0, preview: String(e && e.message || e) };
       }
     }
-    if (acceptOnFail) {
+    if (!strict) {
       log("playlist check failed " + last.status + " but accept (STRICT_PLAYLIST_CHECK!=1)");
       return true;
     }
@@ -114,7 +114,7 @@ function makeValidateStream(page, acceptOnFail) {
 }
 
 async function validateStream(url, log = () => {}) {
-  return makeValidateStream(null, false)(url, log);
+  return makeValidateStream(null)(url, log);
 }
 
 async function capture(options = {}) {
@@ -145,7 +145,7 @@ async function capture(options = {}) {
     const apiGet = (endpoint, params) => scheduleApi(() => requestApi(endpoint, params, signRequest(params)));
 
     const stream = await resolveStreamSource({
-      channelId, apiGet, validateStream: makeValidateStream(page, process.env.STRICT_PLAYLIST_CHECK !== "1"), log, previousCache, sourceState: options.sourceState,
+      channelId, apiGet, validateStream: makeValidateStream(page), log, previousCache, sourceState: options.sourceState,
     });
     if (!stream) {
       log('No playable source found; keeping the previous cache.');

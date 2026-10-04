@@ -5,12 +5,12 @@
  *   /p/hls/?u=<urlencoded> → m3u8/ts 代拉
  *
  * 环境变量:
- *   KK_RELAY_BASE  媒体中转入口, 默认 https://kk.conef1.ggff.net; 空字符串则直连 CDN
+ *   KK_RELAY_BASE  媒体中转入口, 默认停用 (空 = 直连 CDN); 设为中转地址启用, 如 https://kk.conef.de5.net
  *   KK_RELAY_API   API 是否走中转: 默认 off (直连 kapi, 避开 Worker 出口被 WAF)
  *                  设为 1/on 使用 KK_RELAY_BASE, 或填完整中转地址
  */
 
-const DEFAULT_RELAY_BASE = 'https://kk.conef1.ggff.net';
+const DEFAULT_RELAY_BASE = '';
 const DIRECT_API_BASE = 'https://kapi.kankanews.com';
 
 function normalizeBase(value) {

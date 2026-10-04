@@ -6,6 +6,10 @@ node_modules/
 /smg_fivestar.user.js
 /dui.md
 
+# Local scratch captures (unrelated to this project)
+/ritz-espn.html
+/script[0-9].js
+
 # Cache files
 /tmp/
 seg_cache/

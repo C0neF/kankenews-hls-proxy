@@ -16,7 +16,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { pipeline } = require('node:stream/promises');
-const { getDataDir, getDefaultChannelId, readCache: readCacheFile } = require('./cache-store');
+const { getDataDir, getDefaultChannelId, markCacheFailed, readCache: readCacheFile } = require('./cache-store');
 const { COMMON_HEADERS } = require('./http-headers');
 const { requestStream: httpsStream, requestBuffer: httpsBuffer } = require('./upstream-request');
 const { isStreamUsable, streamExpiresAt } = require('./stream-lifetime');
@@ -28,6 +28,7 @@ const {
   shouldCacheSegment,
 } = require('./segment-policy');
 const { toUpstreamMediaUrl } = require('./relay');
+const { fetchPlaylistBody } = require('./browser-playlist');
 
 // ===== 配置 =====
 const PORT = process.env.PORT || 53535;
@@ -99,17 +100,31 @@ async function readCache(channelId = DEFAULT_CHANNEL_ID) {
 }
 
 // ===== m3u8 代理 (清单很小,全缓冲) =====
-async function handleM3u8(req, res, cache, origin) {
-  if (cache.playlistBody && String(cache.playlistBody).trimStart().startsWith('#EXTM3U')) {
+async function handleM3u8(req, res, cache, origin, channelId) {
+  // Live playlists go stale in seconds; always pull a fresh one via browser TLS.
+  const fresh = await fetchPlaylistBody(cache.url);
+  if (fresh?.body) {
+    return sendPlaylist(res, fresh.body, cache.url, origin, cache.signature);
+  }
+  // A readable browser rejection may be a relay/CORS artifact; skip the stale body
+  // and let the server-side fetch (same egress as playback) decide.
+  if (!fresh?.blocked && cache.playlistBody && String(cache.playlistBody).trimStart().startsWith('#EXTM3U')) {
     return sendPlaylist(res, cache.playlistBody, cache.url, origin, cache.signature);
   }
-  const resp = await httpsBuffer(toUpstreamMediaUrl(cache.url), COMMON_HEADERS);
-
+  let resp = await httpsBuffer(toUpstreamMediaUrl(cache.url), COMMON_HEADERS);
+  if (resp.status !== 200 && toUpstreamMediaUrl(cache.url) !== cache.url) {
+    resp = await httpsBuffer(cache.url, COMMON_HEADERS);
+  }
   if (resp.status !== 200) {
+    if (resp.status === 403 && channelId) {
+      // Address confirmed refused: flag the cache so the capture loop retries soon
+      // instead of waiting for the regular expiry margin.
+      const marked = await markCacheFailed(channelId, cache.url, { dataDir: DATA_DIR });
+      if (marked) console.log(`[proxy] channel ${channelId}: upstream 403, flagged cache for recapture`);
+    }
     res.writeHead(resp.status, { 'Content-Type': 'text/plain' });
     return res.end(`upstream ${resp.status}`);
   }
-
   return sendPlaylist(res, resp.body.toString(), cache.url, origin, cache.signature);
 }
 
@@ -324,7 +339,7 @@ const server = http.createServer(async (req, res) => {
 
       const proto = req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http');
       const origin = `${proto}://${req.headers.host}`;
-      return await handleM3u8(req, res, cache, origin);
+      return await handleM3u8(req, res, cache, origin, channelId);
     }
 
     // 404
